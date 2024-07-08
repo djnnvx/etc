@@ -5,6 +5,13 @@
 
 set -euo pipefail
 
+install_wsl_cuda() { # not mandatory but could always be useful
+
+    wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
+    sudo dpkg -i cuda-keyring_1.1-1_all.deb
+    sudo apt-get update
+    sudo apt-get -y install cuda-toolkit-12-5
+}
 
 install_deps() {  # GCC is required
     echo "[+] installing AFL deps"
@@ -90,5 +97,7 @@ install_llvm 17
 install_aflpp
 install_libafl
 install_honggfuzz
+
+install_wsl_cuda
 
 install_clang_static
