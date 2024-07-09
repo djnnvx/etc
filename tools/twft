@@ -1,21 +1,29 @@
 #!/bin/env python3
 
-
 import argparse
 import os
+import json
 from typing import Dict, List, Optional, Iterator
 import concurrent.futures
 
 import urllib.request
-from urllib.parse import urlparse, urlencode, urlunparse
+from urllib.parse import urlencode
 
-FUZZ_PARSER = 'FUZZME'
+FUZZ_KEY = 'FUZZME'
+
+class Request:
+    method: str
+    route: str
+    http_version: str  # NOTE(djnn): parsed but unsupported rn (idc tbh)
+
+    body: Optional[Dict[str, str]]
+    request_params: Optional[Dict[str, str]]
+    headers: Dict[str, str]
+
 
 
 def read_file_batches(file_path: str, batch_size: int = 10) -> Iterator[List[str]]:
-    """
-    Reads a text file in batches of lines.
-    """
+    """Reads a text file in batches of lines."""
     with open(file_path, 'r') as file:
         lines = []
 
@@ -34,96 +42,104 @@ def read_file_batches(file_path: str, batch_size: int = 10) -> Iterator[List[str
             yield lines
 
 
-def parse_request_file(filepath: str) -> Optional[Dict[str, str]]:
-    """
-        parse the request file
-
-        (you can just copy-paste what you have in Burp into a file and that
-        should be good:) )
-    """
+def parse_request_file(filepath: str) -> Optional[Request]:
+    """parse the request file"""
 
     try:
-        result = {}
+        result = Request()
 
         with open(filepath, 'r') as file:
             # we could read line by line here, but we want to keep the body unified
             contents = file.read()
-            request_contents = contents.split('\n')
+            headers_and_body = contents.split('\n\n')
 
-            # FIXME(djnn): retrieving body here (not always \r\n!)
+            # assigning body if there is one
+            assert len(headers_and_body) < 3
+            result.body = json.loads(headers_and_body[1]) if len(headers_and_body) == 2 else None
 
-            # first like should be something like GET / 1.1
-            result['request_and_stuff'] = request_contents[0]
-            result['request_body'] = request_contents[-1] # last will always be body
+            # splitting headers into lines
+            headers = headers_and_body[0].split('\n')
+            assert len(headers) != 0
 
-            # exclude first and last item from the loop
-            for i in range(1, len(result) - 1):
-                item = request_contents[i].split(':')
+            # parsing the first line (eg GET /?test=123 HTTP/1.1)
+            first_line_split = headers[0].split(' ')
+            assert len(first_line_split) == 3
 
-                # lets just skip invalid headers for now?
-                if len(item) != 2:
-                    print(f'[WARN] {item} is invalid header, no?')
-                    continue
+            result.method = first_line_split[0]
+            result.route = first_line_split[1]
+            result.http_version = first_line_split[2]
 
-                result[item[0]] = item[1]
+            # split route after ?, if any items -> put them into the request params
+            split_route = result.route.split('?')
+            assert len(split_route) < 3
+
+            # we have query params!
+            if len(split_route) == 2:
+                result.route = split_route[0]
+                result.request_params = {}
+
+                for param in split_route[1].split('&'):
+                    keyval = param.split('=')
+                    assert len(keyval) == 2
+                    result.request_params[keyval[0]] = keyval[1]
+
+
+            # parsing all headers :)
+            for hdr_idx in range(1, len(headers)):
+                header = headers[hdr_idx]
+                keyval = header.split(': ')
+
+                assert len(keyval) == 2
+                result.headers[keyval[0]] = keyval[1]
 
             return result
 
-    except (FileNotFoundError, PermissionError):
+    except (FileNotFoundError, PermissionError, AssertionError):
         return None
 
 
-def run_request(replace_with: str, filter_by_size: int, headers: Dict[str, str]) -> None:
+def run_request(replace_with: str, filter_by_size: int, use_https: bool, request: Request) -> None:
     """Function to be executed by each worker."""
 
+    local_route = request.route.replace(FUZZ_KEY, replace_with)
     local_headers = {
-        key.replace(FUZZ_PARSER, replace_with): val.replace(FUZZ_PARSER, replace_with)
-             for key, val in headers.items()
+        key.replace(FUZZ_KEY, replace_with): val.replace(FUZZ_KEY, replace_with)
+             for key, val in request.headers.items()
     }
+    local_params = {
+     key.replace(FUZZ_KEY, replace_with): val.replace(FUZZ_KEY, replace_with)
+             for key, val in request.request_params.items()
+    } if request.request_params else {}
 
-    first_line = local_headers.pop('request_and_stuff')
-    split_first_line = first_line.split(' ')
 
-    method, path, protocol = split_first_line[:3]
+    scheme = 'https' if use_https else 'https'
+    full_uri = f'{scheme}://{local_headers["Host"]}{local_route}'
+    if local_params != {}:
+        full_uri = f'{full_uri}?{urlencode(local_params)}'
 
-    # Assuming the rest of the split_first_line after the third element are the query parameters
-    query_params = dict(qc.split('=') for qc in split_first_line[3:] if '=' in qc)
-
-    query_dict = {}
-    for param_str in split_first_line[:3]:
-        key, value = param_str.split('=')
-        query_dict[key] = value
-    query_dict.update(query_params)
-
-    scheme, netloc, path, _, query, _ = urlparse(first_line)
-    netloc = netloc.replace(FUZZ_PARSER, replace_with)  # Replace placeholder with actual value
-
-    query = urlencode(query_dict)
-    url = urlunparse((scheme, netloc, path, '', query, ''))
-
-    body = local_headers.pop('body', '')
-    if filter_by_size and len(body) > filter_by_size:
-        body = body[:filter_by_size]
-
-    # sending request here
-    req = urllib.request.Request(url, data=body.encode(), method=method)
+    req = urllib.request.Request(full_uri, method=request.method)
     for key, val in local_headers.items():
-        req.headers[key] = val
-    try:
-        with urllib.request.urlopen(req) as response:
-            print(response.status, response.reason)
-            content = response.read().decode()
-            print(content)
-    except Exception as e:
-        print(f"Request failed: {e}")
+        req.add_header(key, val)
+
+    with urllib.request.urlopen(req) as f:
+        contents = f.read().decode('utf-8')
+        if len(contents) != filter_by_size:
+
+            print(f'[+] Found interesting request: {full_uri}')
+            print('----====[ REQUEST HEADERS ]====----')
+            for key, val in local_headers.items():
+                print(f'\t{key}: {val}')
+            print(f'\n\nStatus: {f.status}\n')
+            print('----====[ RESPONSE ]====----')
+            print(f'{contents}\n----------------------------\n')
 
 
 def main() -> None:
 
     # set up argument parser and command-line options
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-v", "--verbose", action="store_true", help="increase output verbosity")
-    parser.add_argument("-w", "--wordlist", help="wordlist filepath", default="rockyou.txt")
+    parser = argparse.ArgumentParser(description="tiny web fuzzing tool")
+    parser.add_argument("-s", "--https", action="store_true", help="force https usage", default=False)
+    parser.add_argument("-w", "--wordlist", help="wordlist filepath", default="common.txt")
     parser.add_argument("-fs", "--filter-size", help="filter by size", type=int, default=0)
     parser.add_argument("request", help="filepath containing the HTTP request definition")
 
@@ -139,7 +155,8 @@ def main() -> None:
         print('[!] error: could not read from file.')
         os._exit(1)
 
-    filter_size = parser.filter_size  # type: ignore
+    filter_size = int(parser.filter_size)  # type: ignore
+    use_https = bool(parser.https if parser.https else False)  # type: ignore
     batch_iterator = read_file_batches(parser.wordlist)  # type: ignore
     with concurrent.futures.ThreadPoolExecutor() as executor:
         while True:
@@ -148,7 +165,7 @@ def main() -> None:
                 if not batch:
                     break
 
-                futures = [executor.submit(run_request, line, filter_size, request_items) for line in batch]
+                futures = [executor.submit(run_request, line, filter_size, use_https, request_items) for line in batch]
                 concurrent.futures.wait(futures)
 
             except StopIteration:
