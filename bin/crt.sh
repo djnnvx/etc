@@ -8,8 +8,10 @@ set -euo pipefail
 
 
 check_installed () {
-    # check if dependency is installed
-    which "${1}" >/dev/null || { echo "[!] error: please install ${1}." && exit 1 ; }
+    # check if dependencies are installed
+    for i in "${@}"; do
+        which "${i}" >/dev/null || { echo "[!] error: please install ${1}." && exit 1 ; }
+    done
 }
 
 
