@@ -129,7 +129,7 @@ def run_request(replace_with: str, filter_by_size: int, use_https: bool, request
             print('----====[ REQUEST HEADERS ]====----')
             for key, val in local_headers.items():
                 print(f'\t{key}: {val}')
-            print(f'\n\nStatus: {f.status}\n')
+            print(f'\n\nStatus: {f.status} (len: {len(contents)})\n')
             print('----====[ RESPONSE ]====----')
             print(f'{contents}\n----------------------------\n')
 
@@ -137,7 +137,7 @@ def run_request(replace_with: str, filter_by_size: int, use_https: bool, request
 def main() -> None:
 
     # set up argument parser and command-line options
-    parser = argparse.ArgumentParser(description="tiny web fuzzing tool")
+    parser = argparse.ArgumentParser(description="tiny web fuzzing tool\n\nCopy your request from burp, replace the items you want to fuzz with FUZZME and that's it!")
     parser.add_argument("-s", "--https", action="store_true", help="force https usage", default=False)
     parser.add_argument("-w", "--wordlist", help="wordlist filepath", default="common.txt")
     parser.add_argument("-fs", "--filter-size", help="filter by size", type=int, default=0)
