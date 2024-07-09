@@ -1,0 +1,159 @@
+#!/bin/env python3
+
+
+import argparse
+import os
+from typing import Dict, List, Optional, Iterator
+import concurrent.futures
+
+import urllib.request
+from urllib.parse import urlparse, urlencode, urlunparse
+
+FUZZ_PARSER = 'FUZZME'
+
+
+def read_file_batches(file_path: str, batch_size: int = 10) -> Iterator[List[str]]:
+    """
+    Reads a text file in batches of lines.
+    """
+    with open(file_path, 'r') as file:
+        lines = []
+
+        for _ in range(batch_size):
+            try:
+                line = next(file)
+                lines.append(line)
+
+            # End of file reached, return the last batch if it's not full
+            except StopIteration:
+                if lines:
+                    yield lines
+
+                break
+        else:
+            yield lines
+
+
+def parse_request_file(filepath: str) -> Optional[Dict[str, str]]:
+    """
+        parse the request file
+
+        (you can just copy-paste what you have in Burp into a file and that
+        should be good:) )
+    """
+
+    try:
+        result = {}
+
+        with open(filepath, 'r') as file:
+            # we could read line by line here, but we want to keep the body unified
+            contents = file.read()
+            request_contents = contents.split('\n')
+
+            # FIXME(djnn): retrieving body here (not always \r\n!)
+
+            # first like should be something like GET / 1.1
+            result['request_and_stuff'] = request_contents[0]
+            result['request_body'] = request_contents[-1] # last will always be body
+
+            # exclude first and last item from the loop
+            for i in range(1, len(result) - 1):
+                item = request_contents[i].split(':')
+
+                # lets just skip invalid headers for now?
+                if len(item) != 2:
+                    print(f'[WARN] {item} is invalid header, no?')
+                    continue
+
+                result[item[0]] = item[1]
+
+            return result
+
+    except (FileNotFoundError, PermissionError):
+        return None
+
+
+def run_request(replace_with: str, filter_by_size: int, headers: Dict[str, str]) -> None:
+    """Function to be executed by each worker."""
+
+    local_headers = {
+        key.replace(FUZZ_PARSER, replace_with): val.replace(FUZZ_PARSER, replace_with)
+             for key, val in headers.items()
+    }
+
+    first_line = local_headers.pop('request_and_stuff')
+    split_first_line = first_line.split(' ')
+
+    method, path, protocol = split_first_line[:3]
+
+    # Assuming the rest of the split_first_line after the third element are the query parameters
+    query_params = dict(qc.split('=') for qc in split_first_line[3:] if '=' in qc)
+
+    query_dict = {}
+    for param_str in split_first_line[:3]:
+        key, value = param_str.split('=')
+        query_dict[key] = value
+    query_dict.update(query_params)
+
+    scheme, netloc, path, _, query, _ = urlparse(first_line)
+    netloc = netloc.replace(FUZZ_PARSER, replace_with)  # Replace placeholder with actual value
+
+    query = urlencode(query_dict)
+    url = urlunparse((scheme, netloc, path, '', query, ''))
+
+    body = local_headers.pop('body', '')
+    if filter_by_size and len(body) > filter_by_size:
+        body = body[:filter_by_size]
+
+    # sending request here
+    req = urllib.request.Request(url, data=body.encode(), method=method)
+    for key, val in local_headers.items():
+        req.headers[key] = val
+    try:
+        with urllib.request.urlopen(req) as response:
+            print(response.status, response.reason)
+            content = response.read().decode()
+            print(content)
+    except Exception as e:
+        print(f"Request failed: {e}")
+
+
+def main() -> None:
+
+    # set up argument parser and command-line options
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-v", "--verbose", action="store_true", help="increase output verbosity")
+    parser.add_argument("-w", "--wordlist", help="wordlist filepath", default="rockyou.txt")
+    parser.add_argument("-fs", "--filter-size", help="filter by size", type=int, default=0)
+    parser.add_argument("request", help="filepath containing the HTTP request definition")
+
+    parser.parse_args()
+
+    if not parser.request or not parser.wordlist:   # type: ignore
+        print("[!] error: missing request or wordlist parameter")
+        print("Please run --help option!")
+        os._exit(1)
+
+    request_items = parse_request_file(parser.request)  # type: ignore
+    if not request_items:
+        print('[!] error: could not read from file.')
+        os._exit(1)
+
+    filter_size = parser.filter_size  # type: ignore
+    batch_iterator = read_file_batches(parser.wordlist)  # type: ignore
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        while True:
+            try:
+                batch = next(batch_iterator)
+                if not batch:
+                    break
+
+                futures = [executor.submit(run_request, line, filter_size, request_items) for line in batch]
+                concurrent.futures.wait(futures)
+
+            except StopIteration:
+                break
+
+
+if __name__ == '__main__':
+    main()
