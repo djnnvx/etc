@@ -1,39 +1,44 @@
-#!/usr/bin/env python2
-
-# TODO(djnn): rewrite this in python3
+#!/usr/bin/env python3
 
 import ctypes, re, sys
 
-c_ptrace = ctypes.CDLL("libc.so.6").ptrace
+# Load libc.so.6 dynamically
+libc = ctypes.CDLL("libc.so.6")
+c_ptrace = libc.ptrace
 c_pid_t = ctypes.c_int32
 c_ptrace.argtypes = [ctypes.c_int, c_pid_t, ctypes.c_void_p, ctypes.c_void_p]
 
 def ptrace(attach, pid):
-    op = ctypes.c_int(16 if attach else 17) #PTRACE_ATTACH or PTRACE_DETACH
+    op = ctypes.c_int(16 if attach else 17)  # PTRACE_ATTACH or PTRACE_DETACH
     c_pid = c_pid_t(pid)
     null = ctypes.c_void_p()
     err = c_ptrace(op, c_pid, null, null)
-    if err != 0: raise SysError, 'ptrace', err
+    if err != 0:
+        raise OSError('ptrace')
 
 def maps_line_range(line):
     m = re.match(r'([0-9A-Fa-f]+)-([0-9A-Fa-f]+) ([-r])', line)
+    if not m:
+        return []
     return [int(m.group(1), 16), int(m.group(2), 16), m.group(3)]
 
 def cat_proc_mem(pid):
     ptrace(True, int(pid))
-    maps_file = open("/proc/" + pid + "/maps", 'r')
-    ranges = map(maps_line_range, maps_file.readlines())
-    maps_file.close()
-    mem_file = open("/proc/" + pid + "/mem", 'r', 0)
-    for r in ranges:
-        if r[2] == 'r':
-            mem_file.seek(r[0])
-            chunk = mem_file.read(r[1] - r[0])
-            print chunk,
+    maps_file_path = f"/proc/{pid}/maps"
+    with open(maps_file_path, 'r') as maps_file:
+        ranges = map(maps_line_range, maps_file.readlines())
 
-    mem_file.close()
+    mem_file_path = f"/proc/{pid}/mem"
+    with open(mem_file_path, 'rb') as mem_file:
+        for r in ranges:
+            if r[2] == 'r':
+                mem_file.seek(r[0])
+                chunk = mem_file.read(r[1] - r[0])
+                print(chunk, end='')
+
     ptrace(False, int(pid))
 
 if __name__ == "__main__":
     for pid in sys.argv[1:]:
         cat_proc_mem(pid)
+
