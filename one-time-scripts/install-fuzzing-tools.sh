@@ -24,7 +24,7 @@ install_deps() {  # GCC is required
 
     pipx ensurepath
 
-    pip install unicorn
+    # pipx install unicorn
     pipx install semgrep
 }
 
