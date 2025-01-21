@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-export LLVM_VERSION=14
+export LLVM_VERSION=19
 
 install_wsl_cuda() { # not mandatory but could always be useful
 
@@ -21,8 +21,8 @@ install_deps() {  # GCC is required
     sudo apt-get update
     sudo apt-get install -y build-essential python3-dev automake cmake git flex bison libglib2.0-dev libpixman-1-dev python3-setuptools cargo libgtk-3-dev
 
-    # try to install llvm 14 and install the distro default if that fails
-    sudo apt-get install -y lld-${LLVM_VERSION} llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev clang-14 || sudo apt-get install -y lld llvm llvm-dev clang
+    # try to install llvm ${LLVM_VERSION} and install the distro default if that fails
+    sudo apt-get install -y lld-${LLVM_VERSION} llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev clang-${LLVM_VERSION} || sudo apt-get install -y lld llvm llvm-dev clang
     sudo apt-get install -y gcc-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-plugin-dev libstdc++-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-dev
 
     sudo apt-get install -y ninja-build # for QEMU mode
