@@ -73,17 +73,17 @@ install_honggfuzz() {
 install_clang_static() {
     echo "[+] installing clang-static-analyzer"
 
-    sudo apt-get install -y clang clang-tools
+    # sudo apt-get install -y clang clang-tools
 
-    # git clone https://github.com/llvm/llvm-project.git
+    git clone https://github.com/llvm/llvm-project.git
 
-    # mkdir -p llvm-project/build
-    # cd llvm-project/build
+    mkdir -p llvm-project/build
+    cd llvm-project/build
 
-    # cmake -DLLVM_ENABLE_PROJECTS=clang -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" ../llvm
-    # make && sudo make install
+    cmake -DLLVM_ENABLE_PROJECTS=clang -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" ../llvm
+    make && sudo make install
 
-    # cd -
+    cd -
 }
 
 ##
@@ -93,7 +93,7 @@ install_clang_static() {
 sudo apt update && sudo apt upgrade -y
 
 install_deps
-install_llvm 17
+install_llvm 20
 install_aflpp
 install_libafl
 install_honggfuzz
