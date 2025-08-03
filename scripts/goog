@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+SEARCH_URL="https://www.google.com/search?q="
+
+# Check if a browser is set, otherwise default to firefox
+if [[ -z "$BROWSER" ]]; then
+    BROWSER="firefox"
+fi
+
+# use printf to handle arguments with spaces and join them with '+'
+QUERY=$(printf '%s+' "$@")
+QUERY=${QUERY%+}  # Remove the trailing '+'
+
+FULL_URL="${SEARCH_URL}${QUERY}"
+bash -c "${BROWSER} ${FULL_URL}"
