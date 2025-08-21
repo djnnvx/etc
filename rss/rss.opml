@@ -11,9 +11,10 @@
 	<outline text="Bad Sector Labs Blog" title="Bad Sector Labs Blog" description="" type="rss" version="RSS" htmlUrl="https://blog.badsectorlabs.com/" xmlUrl="https://blog.badsectorlabs.com/feeds/all.atom.xml"/>
 	<outline text="chebuya blog" title="chebuya blog" description="" type="rss" version="RSS" htmlUrl="https://blog.chebuya.com/" xmlUrl="https://blog.chebuya.com/index.xml"/>
 	<outline text="DataBreaches.Net" title="DataBreaches.Net" description="" type="rss" version="RSS" htmlUrl="https://databreaches.net/" xmlUrl="https://databreaches.net/rss"/>
+	<outline text="Diary of a reverse-engineer" title="Diary of a reverse-engineer" description="" type="rss" version="RSS" htmlUrl="https://doar-e.github.io/" xmlUrl="https://doar-e.github.io/feeds/rss.xml"/>
 	<outline text="Just another infosec blog type of thing - Medium" title="Just another infosec blog type of thing - Medium" description="" type="rss" version="RSS" htmlUrl="https://blog.0day.rocks?source=rss----6beb88197afc---4/" xmlUrl="https://blog.0day.rocks/feed"/>
 	<outline text="Kylm" title="Kylm" description="" type="rss" version="RSS" htmlUrl="https://0xkylm.github.io/posts/" xmlUrl="https://0xkylm.github.io/posts/index.xml"/>
-	<outline text="Lobsters: Top Stories of the Past Week" title="Lobsters: Top Stories of the Past Week" description="" type="rss" version="RSS" htmlUrl="https://lobste.rs/" xmlUrl="https://lobste.rs/top/rss"/>
+	<outline text="Le Grand Continent" title="Le Grand Continent" description="" type="rss" version="RSS" htmlUrl="https://legrandcontinent.eu/fr/" xmlUrl="https://legrandcontinent.eu/fr/feed"/>
 	<outline text="OCD Sensepost" title="OCD Sensepost" description="" type="rss" version="RSS" htmlUrl="https://sensepost.com/rss.xml" xmlUrl="https://sensepost.com/rss.xml"/>
 	<outline text="personal blog" title="personal blog" description="" type="rss" version="RSS" htmlUrl="https://djnn.sh/posts/" xmlUrl="https://djnn.sh/posts/index.xml"/>
 	<outline text="Posts on Matt Suiche" title="Posts on Matt Suiche" description="" type="rss" version="RSS" htmlUrl="https://www.msuiche.com/posts/" xmlUrl="https://www.msuiche.com/posts/index.xml"/>
