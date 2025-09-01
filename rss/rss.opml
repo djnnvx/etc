@@ -8,10 +8,13 @@
 	<outline text="0xdf hacks stuff" title="0xdf hacks stuff" description="" type="rss" version="RSS" htmlUrl="https://0xdf.gitlab.io/" xmlUrl="https://0xdf.gitlab.io/feed.xml"/>
 	<outline text="0xPat blog" title="0xPat blog" description="" type="rss" version="RSS" htmlUrl="https://0xpat.github.io/" xmlUrl="https://0xpat.github.io/feed"/>
 	<outline text="AccessDPRK" title="AccessDPRK" description="" type="rss" version="RSS" htmlUrl="https://mynorthkorea.blogspot.com/" xmlUrl="https://mynorthkorea.blogspot.com/feeds/posts/default"/>
+	<outline text="Africa Intelligence" title="Africa Intelligence" description="" type="rss" version="RSS" htmlUrl="https://www.africaintelligence.com/" xmlUrl="https://feeds.feedburner.com/AfricaIntelligence"/>
 	<outline text="Bad Sector Labs Blog" title="Bad Sector Labs Blog" description="" type="rss" version="RSS" htmlUrl="https://blog.badsectorlabs.com/" xmlUrl="https://blog.badsectorlabs.com/feeds/all.atom.xml"/>
 	<outline text="chebuya blog" title="chebuya blog" description="" type="rss" version="RSS" htmlUrl="https://blog.chebuya.com/" xmlUrl="https://blog.chebuya.com/index.xml"/>
 	<outline text="DataBreaches.Net" title="DataBreaches.Net" description="" type="rss" version="RSS" htmlUrl="https://databreaches.net/" xmlUrl="https://databreaches.net/rss"/>
 	<outline text="Diary of a reverse-engineer" title="Diary of a reverse-engineer" description="" type="rss" version="RSS" htmlUrl="https://doar-e.github.io/" xmlUrl="https://doar-e.github.io/feeds/rss.xml"/>
+	<outline text="Forbidden Stories" title="Forbidden Stories" description="" type="rss" version="RSS" htmlUrl="https://forbiddenstories.org/" xmlUrl="https://forbiddenstories.org/feed"/>
+	<outline text="Intelligence Online : Issue" title="Intelligence Online : Issue" description="" type="rss" version="RSS" htmlUrl="https://www.intelligenceonline.com/" xmlUrl="https://feeds.feedburner.com/IntelligenceOnline"/>
 	<outline text="Just another infosec blog type of thing - Medium" title="Just another infosec blog type of thing - Medium" description="" type="rss" version="RSS" htmlUrl="https://blog.0day.rocks?source=rss----6beb88197afc---4/" xmlUrl="https://blog.0day.rocks/feed"/>
 	<outline text="Kylm" title="Kylm" description="" type="rss" version="RSS" htmlUrl="https://0xkylm.github.io/posts/" xmlUrl="https://0xkylm.github.io/posts/index.xml"/>
 	<outline text="Le Grand Continent" title="Le Grand Continent" description="" type="rss" version="RSS" htmlUrl="https://legrandcontinent.eu/fr/" xmlUrl="https://legrandcontinent.eu/fr/feed"/>
@@ -23,6 +26,7 @@
 	<outline text="Pwned (cybersec stories)" title="Pwned (cybersec stories)" description="" type="rss" version="RSS" htmlUrl="https://pwned.substack.com/" xmlUrl="https://pwned.substack.com/feed"/>
 	<outline text="rayanlecat blog" title="rayanlecat blog" description="" type="rss" version="RSS" htmlUrl="https://www.rayanle.cat/" xmlUrl="http://rayanle.cat/rss"/>
 	<outline text="secret club" title="secret club" description="" type="rss" version="RSS" htmlUrl="https://secret.club/" xmlUrl="https://secret.club/feed.xml"/>
+	<outline text="SpyTalk" title="SpyTalk" description="" type="rss" version="RSS" htmlUrl="https://www.spytalk.co/" xmlUrl="https://www.spytalk.co/feed"/>
 	<outline text="Talkback Resources" title="Talkback Resources" description="" type="rss" version="RSS" htmlUrl="https://talkback.sh/resources/feed/" xmlUrl="https://talkback.sh/resources/feed/"/>
 	<outline text="watchTowr Labs" title="watchTowr Labs" description="" type="rss" version="RSS" htmlUrl="https://labs.watchtowr.com/" xmlUrl="https://labs.watchtowr.com/feed"/>
 	</body>
