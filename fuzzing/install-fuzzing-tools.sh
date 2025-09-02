@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-export LLVM_VERSION=19
+export LLVM_VERSION=18
 
 install_wsl_cuda() { # not mandatory but could always be useful
 
