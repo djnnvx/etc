@@ -1,51 +1,53 @@
 #!/bin/bash
 set -e
 
-# Variables (edit if needed)
 REPO_URL="https://github.com/proftpd/proftpd.git"
 REPO_DIR="proftpd"
-CC=${CC:-gcc}
-CXX=${CXX:-g++}
-CFLAGS=${CFLAGS:-"-O2"}
-CXXFLAGS=${CXXFLAGS:-"-O2"}
-LIB_FUZZING_ENGINE=${LIB_FUZZING_ENGINE:-"-fsanitize=fuzzer"}
+REPO_VERSION="1.3.9"
+
 OUT_DIR="fuzz_out"
 SEED_CORPUS_URL="https://github.com/dvyukov/go-fuzz-corpus.git"
+FUZZ_TARGET="json_fuzzer"
 
-# Clone the repository
-git clone "$REPO_URL"
+CC=${CC:-clang}
+CXX=${CXX:-clang++}
+CFLAGS=${CFLAGS:-"-O2 -fsanitize=fuzzer,address -fPIC"}
+CXXFLAGS=${CXXFLAGS:-"-O2 -fsanitize=fuzzer,address -fPIC"}
+
+echo "Cloning ProFTPD repository..."
+if [ ! -d "$REPO_DIR" ]; then
+    git clone "$REPO_URL" --branch "$REPO_VERSION"
+fi
 cd "$REPO_DIR"
 
-# Configure and build
-export LDFLAGS="${CFLAGS}"
-./configure --enable-ctrls
+echo "Configuring and building ProFTPD..."
+make clean
+./configure --enable-ctrls --enable-devel=stacktrace
 make -j"$(nproc)"
 
-# Patch src/main.c for fuzzing
-sed 's/int main(/int main2(/g' -i src/main.c
-
-# Compile main.c again
-NEW_CC_FLAG="$CC $CFLAGS -DHAVE_CONFIG_H -DLINUX  -I. -I./include"
-$NEW_CC_FLAG -c src/main.c -o src/main.o
-rm src/ftpdctl.o || true
-
-# Create fuzz_lib.a from all object files
-find . -name "*.o" -exec ar rcs fuzz_lib.a {} \;
-
-# Build fuzzer (assumes tests/fuzzing/fuzzer.c exists)
+echo "Building the fuzzer executable..."
 mkdir -p "$OUT_DIR"
-$NEW_CC_FLAG -c tests/fuzzing/fuzzer.c -o fuzzer.o
-$CC $CXXFLAGS $LIB_FUZZING_ENGINE fuzzer.o -o "$OUT_DIR/fuzzer" \
-    src/scoreboard.o \
+$CC $CFLAGS -c tests/fuzzing/json_fuzzer.c -o "$OUT_DIR/$FUZZ_TARGET.o" -I. -I./include -DHAVE_CONFIG_H -DLINUX
+
+CORE_OBJS=$(find src/ -name "*.o" ! -name "main.o" ! -name "ftpdctl.o" | tr '\n' ' ')
+MODULES_OBJS=$(find modules/ -name "*.o" | tr '\n' ' ')
+
+# Link the fuzzer with all relevant object files and libraries
+# FIXME(djnn): this is currently broken x.x
+$CXX $CXXFLAGS "$OUT_DIR/$FUZZ_TARGET.o" \
+    $CORE_OBJS \
+    $MODULES_OBJS \
     lib/prbase.a \
-    fuzz_lib.a \
-    -Llib \
-    -lcrypt -pthread
+    -o "$OUT_DIR/$FUZZ_TARGET" -Llib -lcrypt -pthread
 
-# Build seed corpus
-git clone "$SEED_CORPUS_URL"
-zip "$OUT_DIR/fuzzer_seed_corpus.zip" go-fuzz-corpus/json/corpus/*
+echo "Building seed corpus..."
+cd ..
+if [ ! -d "go-fuzz-corpus" ]; then
+    git clone "$SEED_CORPUS_URL"
+fi
+zip -r "$REPO_DIR/$OUT_DIR/${FUZZ_TARGET}_seed_corpus.zip" go-fuzz-corpus/json/corpus/
 
-echo "=== Build complete ==="
-echo "To run fuzzing:"
-echo "$OUT_DIR/fuzzer -runs=1000000 $OUT_DIR/fuzzer_seed_corpus.zip"
+echo "Build complete."
+echo "To run the fuzzer:"
+echo "./$REPO_DIR/$OUT_DIR/$FUZZ_TARGET $OUT_DIR/${FUZZ_TARGET}_seed_corpus.zip"
+echo
