@@ -1,0 +1,112 @@
+#!/usr/bin/env python
+
+help = """
+    This is a simple script to spam the stupid scams that you receive using SMS.
+
+    Goal is simple, go through the flow, grab the request that ingests information
+    into their database (usually credit card details, etc.), then replay it using
+    this CLI.
+
+"""
+
+
+from argparse import ArgumentParser
+
+import random
+import requests
+
+EXAMPLE_DATA_RAW = '{titu=FILE_login_bypass.txt&ccc=FILE_4-digits-0000-9999-FILE_4-digits-0000-9999-FILE_4-digits-0000-9999-FILE_4-digits-0000-9999&exp=FUN_autogen_date&cvc=FILE_3-digits-000-999}'
+
+DEFAULT_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0'
+
+
+def autogen_date() -> str:
+    month = random.randint(1, 12)
+
+    day = random.randint(1, 31)
+    random_date_string = f"{month:02d}/{day:02d}"
+    return random_date_string
+
+
+def get_random_line_from_file(filename):
+    # The lion does not concern himself with performance issues
+
+    if not os.path.exists(filepath):
+        print(f"Error: The file '{filepath}' was not found.")
+        return None
+     try:
+            with open(filepath, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+                clean_lines = [line.strip() for line in lines if line.strip()]
+
+                if not clean_lines:
+                    print(f"The file '{filepath}' is empty or only contains blank lines.")
+                    return None
+
+                random_line = random.choice(clean_lines)
+
+                return random_line
+
+        except IOError as e:
+            print(f"An error occurred while reading the file: {e}")
+            return None
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            return None
+
+
+def main() -> None:
+
+    parser = ArgumentParser(prog='scam-spam', description=help)
+    parser.add_argument(
+        '--method',
+        type=str,
+        choices=['POST', 'GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+        default='POST',
+        required=False,
+        help='The HTTP method to use (e.g., POST, GET).',
+        metavar='METHOD'
+    )
+
+    parser.add_argument(
+        'url',
+        type=str,
+        help='The full URL to be processed (e.g., https://example.com/api).',
+    )
+
+    parser.add_argument(
+        '--count',
+        type=int,
+        default=7000,
+        help='The number of times to perform the action (default: 7000).',
+        metavar='N'
+    )
+
+    parser.add_argument(
+        '--wordlists-dir',
+        type=str,
+        default='/usr/share/seclists/Fuzzing',
+        help='The directory containing wordlist files (default: /usr/share/seclists/Fuzzing).',
+        metavar='DIR_PATH'
+    )
+
+    parser.add_argument(
+        '--user-agent',
+        type=str,
+        default=DEFAULT_USER_AGENT,
+        help=f'The HTTP User-Agent string to use (default: "{DEFAULT_USER_AGENT}").',
+        metavar='AGENT_STRING'
+    )
+
+    parser.add_argument(
+        '--data-raw',
+        type=str,
+        help=f'Raw request data in JSON format (example: "{EXAMPLE_DATA_RAW}").'
+    )
+
+    args = parser.parse_args()
+
+
+if __name__ == "__main__":
+    main()
