@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+
+import xml.etree.ElementTree as ET
+import sys
+from collections import defaultdict
+
+def analyze_cppcheck_results(xml_file_path):
+    """
+    Parses a Cppcheck XML report, ranks findings by severity, and prints a summary.
+
+    To get XML file:
+        cppcheck --enable=all --xml <directory-with-source-code> 2> cpp-check.xml
+
+
+    Args:
+        xml_file_path (str): The path to the Cppcheck XML output file.
+    """
+    try:
+        tree = ET.parse(xml_file_path)
+        root = tree.getroot()
+    except FileNotFoundError:
+        print(f"Error: The file '{xml_file_path}' was not found.")
+        return
+    except ET.ParseError:
+        print(f"Error: Failed to parse the XML file '{xml_file_path}'. Please ensure it is a valid Cppcheck XML report.")
+        return
+
+    # Severity levels, ordered from highest to lowest criticity
+    severity_order = ['error', 'warning', 'style', 'performance', 'portability', 'information']
+    findings_by_severity = defaultdict(list)
+
+    for error_element in root.findall('.//error'):
+        severity = error_element.get('severity')
+        message = error_element.get('msg')
+        file = ""
+        line = ""
+
+        # Find the first 'location' element to get the file and line number
+        location_element = error_element.find('location')
+        if location_element is not None:
+            file = location_element.get('file', 'N/A')
+            line = location_element.get('line', 'N/A')
+
+        if severity:
+            findings_by_severity[severity].append({
+                'message': message,
+                'file': file,
+                'line': line,
+            })
+
+    print("--- Cppcheck Analysis Report ---")
+    print(f"Found {sum(len(v) for v in findings_by_severity.values())} total issues.\n")
+
+    for severity in severity_order:
+        if severity in findings_by_severity:
+            findings = findings_by_severity[severity]
+            print(f"[{severity.upper()}] - Total: {len(findings)}")
+            print("-" * 25)
+            for finding in findings:
+                print(f"  - {finding['message']}")
+                print(f"    - File: {finding['file']}:{finding['line']}")
+            print("\n")
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: python analyze_cppcheck_results.py <path_to_xml_file>")
+        sys.exit(1)
+
+    xml_file = sys.argv[1]
+    analyze_cppcheck_results(xml_file)
