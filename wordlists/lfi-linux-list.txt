@@ -910,6 +910,7 @@
 /xampp/sendmail/sendmail.ini
 /xampp/sendmail/sendmail.log
 /xampp/webalizer/webalizer.conf
+/proc/self/environ
 /proc/self/fd/0
 /proc/self/fd/1
 /proc/self/fd/2
