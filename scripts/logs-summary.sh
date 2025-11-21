@@ -62,20 +62,18 @@ print_header "Top $LIMIT Most Visited Links"
 
 print_header "Top $LIMIT Client IPs"
 (cat access.log access.log.1 2>/dev/null ; zcat access.log.*.gz 2>/dev/null) | \
-    awk -F'"' 'NF > 0 { print $(NF-1) }' | awk -F, '{ print $1 }' | tr -d ' ' | \
+    awk -F'"' 'NF >= 8 { print $8 }' | \
+    tr -d ' ' | \
     sort | uniq -c | sort -nr | head -n "$LIMIT"
 
 print_header "Top $LIMIT User Agents"
 (cat access.log access.log.1 2>/dev/null ; zcat access.log.*.gz 2>/dev/null) | \
-    awk -F'"' 'NF > 3 { print $(NF-3) }' | \
+    awk -F'"' 'NF >= 6 { print $6 }' | \
     sort | uniq -c | sort -nr | head -n "$LIMIT"
-
 
 # --- Error Log Analysis ---
 
 print_header "Top $LIMIT Nginx Errors"
-# This command strips the timestamp and any client/request info
-# to group similar errors together.
 (cat error.log error.log.1 2>/dev/null ; zcat error.log.*.gz 2>/dev/null) | \
     awk -F'] ' '{print $2}' | awk -F',' '{print $1}' | \
     sort | uniq -c | sort -nr | head -n "$LIMIT"
