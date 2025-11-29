@@ -41,3 +41,5 @@ echo "[+] Creating new device"
 avdmanager create avd --name "p2o-test-device" \
     --package $VERSION \
     --device "automotive_1024p_landscape"
+
+echo "[+] Done! Run with 'emulator -avd p2o-test-device'"
