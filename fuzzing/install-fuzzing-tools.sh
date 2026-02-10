@@ -3,87 +3,98 @@
 set -euo pipefail
 
 export LLVM_VERSION=18
+export LLVM_CONFIG=llvm-config-18
 
-install_llvm() {
-    echo "[+] installing LLVM ${LLVM_VERSION}"
+export CARGO_HOME="$HOME/.cargo"
+export RUSTUP="$CARGO_HOME/bin/rustup"
+export CARGO="$CARGO_HOME/bin/cargo"
+export RUSTC="$CARGO_HOME/bin/rustc"
 
-    # Download the official script
-    wget -c https://apt.llvm.org/llvm.sh && chmod +x llvm.sh
+# Remove previously failed repository attempts if any
+sudo rm -f /etc/apt/sources.list.d/archive_uri-http_apt_llvm_org_questing_-questing.list
+sudo rm -f /etc/apt/sources.list.d/llvm.list
 
-    # Detect codename; if it's unknown or "questing", fallback to "noble"
-    CODENAME=$(lsb_release -s -c)
-    if [[ "$CODENAME" == "questing" || "$CODENAME" == "oracular" || "$CODENAME" == "plucky" ]]; then
-        echo "[!] Non-LTS or unknown distro detected ($CODENAME). Using 'noble' repositories for LLVM."
-        # We manually run the addition to avoid the script's auto-detection failure
-        sudo apt-get install -y software-properties-common
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
-        echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" | sudo tee /etc/apt/sources.list.d/llvm.list
-        sudo apt-get update
-        sudo apt-get install -y clang-${LLVM_VERSION} lldb-${LLVM_VERSION} lld-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev
-    else
-        sudo ./llvm.sh "${LLVM_VERSION}"
+install_deps() {
+    echo "[+] Installing system dependencies"
+    sudo apt-get update
+    sudo apt-get install -y build-essential python3-dev automake cmake git flex bison \
+        libglib2.0-dev libpixman-1-dev python3-setuptools libgtk-3-dev \
+        ninja-build cpio libcapstone-dev wget curl python3-pip pipx binutils-dev \
+        cppcheck libunwind-dev libblocksruntime-dev gpg software-properties-common
+
+    # Get GCC version for plugin headers
+    GCC_VER=$(gcc --version | head -n1 | cut -d' ' -f3 | cut -d'.' -f1)
+    sudo apt-get install -y "gcc-${GCC_VER}-plugin-dev" "libstdc++-${GCC_VER}-dev"
+}
+
+install_rust() {
+    echo "[+] Installing/Updating Rust"
+
+    if [ ! -f "$RUSTUP" ]; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
     fi
 
-    export LLVM_CONFIG=llvm-config-${LLVM_VERSION}
+    # Explicitly update to latest stable (1.89+)
+    "$RUSTUP" update stable
+    "$RUSTUP" default stable
+
+    echo "[*] Verified Rust version: $("$RUSTC" --version)"
+}
+
+install_llvm() {
+    echo "[+] Installing LLVM ${LLVM_VERSION}"
+
+    wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor --yes -o /usr/share/keyrings/llvm-archive-keyring.gpg
+
+    # Using 'noble' because Ubuntu 25 (plucky/oracular) isn't on the LLVM repo servers yet
+    echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_VERSION} main" | sudo tee /etc/apt/sources.list.d/llvm.list
+
+    sudo apt-get update
+    sudo apt-get install -y clang-${LLVM_VERSION} lldb-${LLVM_VERSION} lld-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev
+
+    # Ensure LLVM_CONFIG is kept for sudo make install steps
     echo "Defaults env_keep += \"LLVM_CONFIG\"" | sudo tee /etc/sudoers.d/llvm_env
 }
 
-install_deps() {
-    echo "[+] installing AFL deps"
-    sudo apt-get update
-
-    # Install core build tools first
-    sudo apt-get install -y build-essential python3-dev automake cmake git flex bison \
-        libglib2.0-dev libpixman-1-dev python3-setuptools cargo libgtk-3-dev \
-        ninja-build cpio libcapstone-dev wget curl python3-pip pipx binutils-dev \
-        cppcheck libunwind-dev libblocksruntime-dev
-
-    # Get GCC version for plugin-dev headers
-    GCC_VER=$(gcc --version | head -n1 | cut -d' ' -f3 | cut -d'.' -f1)
-    sudo apt-get install -y "gcc-${GCC_VER}-plugin-dev" "libstdc++-${GCC_VER}-dev"
-
-    pipx ensurepath
-}
-
-install_aflpp() {
-    echo "[+] installing AFL++"
-    if [ ! -d "aflpp" ]; then
-        git clone https://github.com/AFLplusplus/AFLplusplus aflpp --branch=stable
-    fi
-    cd aflpp
-    # Ensure LLVM_CONFIG is picked up
-    export LLVM_CONFIG=llvm-config-${LLVM_VERSION}
-    make clean
-    make && sudo make install
-    cd -
-}
-
 install_libafl() {
-    echo "[+] installing libAFL"
-    if ! command -v rustc &> /dev/null; then
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source "$HOME/.cargo/env"
-    fi
-    cargo install cargo-make || true
+    echo "[+] Installing LibAFL"
+
+    "$CARGO" install cargo-make || true
+
     if [ ! -d "libafl" ]; then
         git clone https://github.com/AFLplusplus/LibAFL libafl --branch=main
     fi
-    cd libafl && cargo build --release && cd ..
+
+    cd libafl
+    # Explicitly use the new cargo binary
+    "$CARGO" build --release
+    cd ..
+}
+
+install_aflpp() {
+    echo "[+] Installing AFL++"
+    [ -d "aflpp" ] || git clone https://github.com/AFLplusplus/AFLplusplus aflpp --branch=stable
+    cd aflpp
+    make clean
+    # Pass LLVM_CONFIG directly to make
+    LLVM_CONFIG=llvm-config-${LLVM_VERSION} make
+    sudo make install
+    cd -
 }
 
 install_honggfuzz() {
-    echo "[+] installing honggfuzz"
-    if [ ! -d "honggfuzz" ]; then
-        git clone https://github.com/google/honggfuzz
-    fi
-    cd honggfuzz && make && sudo make install && cd ..
+    echo "[+] Installing honggfuzz"
+    [ -d "honggfuzz" ] || git clone https://github.com/google/honggfuzz
+    cd honggfuzz
+    make
+    sudo make install
+    cd ..
 }
 
-sudo apt update && sudo apt upgrade -y
+# --- MAIN ---
 install_deps
+install_rust
 install_llvm
-install_aflpp
 install_libafl
+install_aflpp
 install_honggfuzz
-
-echo "[*] Installation complete. Please restart your terminal or run 'source ~/.bashrc'"
