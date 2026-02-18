@@ -1,7 +1,7 @@
 #!/bin/bash
-# Run all TTYD fuzzers in tmux sessions
-# Supports: dictionaries, CmpLog, parallel fuzzing
-# Safe to detach from SSH - sessions persist in background
+# Run all TTYD fuzzers in tmux
+# Two visible panes (one main per target), cmplog + secondaries run headless
+# Safe to detach from SSH - everything persists in background
 
 set -e
 
@@ -20,7 +20,7 @@ if ! command -v afl-fuzz &> /dev/null; then
 fi
 
 # Check that harnesses are built
-for harness in fuzz_auth_header fuzz_websocket_auth fuzz_http_parsing; do
+for harness in fuzz_websocket_auth fuzz_http_parsing; do
     if [ ! -x "$SCRIPT_DIR/$harness" ]; then
         echo "[!] $harness not found. Run ./build_fuzzers.sh first."
         exit 1
@@ -28,7 +28,7 @@ for harness in fuzz_auth_header fuzz_websocket_auth fuzz_http_parsing; do
 done
 
 # Generate corpus if missing
-for dir in auth_header websocket_auth http_parsing; do
+for dir in websocket_auth http_parsing; do
     if [ ! -d "$SCRIPT_DIR/corpus/$dir" ] || [ -z "$(ls -A "$SCRIPT_DIR/corpus/$dir" 2>/dev/null)" ]; then
         echo "[*] Corpus missing. Run ./build_fuzzers.sh first to generate it."
         exit 1
@@ -45,125 +45,108 @@ for candidate in /usr/share/afl++/dictionaries /usr/local/share/afl++/dictionari
 done
 
 if [ -z "$DICT_DIR" ]; then
-    echo "[!] Warning: No AFL++ dictionaries directory found. Running without dictionaries."
-    echo "    Expected at: /usr/share/afl++/dictionaries/"
+    echo "[!] Warning: No AFL++ dictionaries directory found."
 fi
 
 # Calculate core allocation
 TOTAL_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-CORES_PER_TARGET=$((TOTAL_CORES / 3))
+CORES_PER_TARGET=$((TOTAL_CORES / 2))
 [ "$CORES_PER_TARGET" -lt 1 ] && CORES_PER_TARGET=1
 
 echo "[*] System: $TOTAL_CORES cores, $CORES_PER_TARGET per target"
 
 # Create output directories
-mkdir -p "$SCRIPT_DIR/output/auth_header" "$SCRIPT_DIR/output/websocket_auth" "$SCRIPT_DIR/output/http_parsing"
+mkdir -p "$SCRIPT_DIR/output/websocket_auth" "$SCRIPT_DIR/output/http_parsing"
 
 # Kill existing session if running
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
-echo "[*] Starting fuzzing sessions in tmux session: $SESSION"
+echo "[*] Starting fuzzing in tmux session: $SESSION"
 echo
 
-# Build afl-fuzz command for a given target
-# Usage: build_afl_cmd <harness_name> <corpus_dir> <output_dir> <dict_file> <node_type> [extra_flags]
+# Build afl-fuzz command
 build_afl_cmd() {
-    local harness=$1
-    local corpus=$2
-    local output=$3
-    local dict=$4
-    local node_flag=$5
+    local harness=$1 corpus=$2 output=$3 dict=$4 node_flag=$5
     shift 5
-    local extra_flags="$*"
-
+    local extra="$*"
     local cmd="afl-fuzz -i $corpus -o $output $node_flag"
-
-    # Add dictionary if available
-    if [ -n "$DICT_DIR" ] && [ -f "$DICT_DIR/$dict" ]; then
-        cmd="$cmd -x $DICT_DIR/$dict"
-    fi
-
-    # Add any extra flags (e.g., -c for CmpLog)
-    if [ -n "$extra_flags" ]; then
-        cmd="$cmd $extra_flags"
-    fi
-
+    [ -n "$DICT_DIR" ] && [ -f "$DICT_DIR/$dict" ] && cmd="$cmd -x $DICT_DIR/$dict"
+    [ -n "$extra" ] && cmd="$cmd $extra"
     cmd="$cmd -- ./$harness"
     echo "$cmd"
 }
 
-# Launch a fuzzing campaign for one target
-# Usage: launch_target <window_name> <harness_name> <corpus_dir_name> <dict_file>
-launch_target() {
-    local window_name=$1
-    local harness=$2
-    local corpus_dir=$3
-    local dict=$4
-    local output_dir="output/$corpus_dir"
-    local corpus_path="corpus/$corpus_dir"
-    local has_cmplog=false
+# Custom mutator for http_parsing
+HTTP_ENV=""
+if [ -f "$SCRIPT_DIR/http_mutator.so" ]; then
+    HTTP_ENV="AFL_CUSTOM_MUTATOR_LIBRARY=$SCRIPT_DIR/http_mutator.so"
+    echo "[+] Using custom HTTP mutator for http_parsing"
+fi
 
-    if [ -x "$SCRIPT_DIR/${harness}_cmplog" ]; then
-        has_cmplog=true
-    fi
+# ── Launch headless background nodes ──────────────────────────────────────────
+# These run without a UI pane — they sync via the shared output dir
+BG_PIDS=()
 
-    # Master node
-    local master_cmd
-    master_cmd=$(build_afl_cmd "$harness" "$corpus_path" "$output_dir" "$dict" "-M main")
-
-    if [ "$window_name" = "auth_header" ]; then
-        # First window - create the session
-        tmux new-session -d -s "$SESSION" -n "$window_name" \
-            "cd '$SCRIPT_DIR' && $master_cmd; read"
-    else
-        tmux new-window -t "$SESSION" -n "$window_name" \
-            "cd '$SCRIPT_DIR' && $master_cmd; read"
-    fi
-
-    local node_count=1
-
-    # CmpLog node (if cmplog binary exists)
-    if $has_cmplog && [ "$CORES_PER_TARGET" -ge 2 ]; then
-        local cmplog_cmd
-        cmplog_cmd=$(build_afl_cmd "$harness" "$corpus_path" "$output_dir" "$dict" "-S cmplog" "-c ./${harness}_cmplog")
-        tmux split-window -h -t "$SESSION:$window_name" \
-            "cd '$SCRIPT_DIR' && $cmplog_cmd; read"
-        node_count=$((node_count + 1))
-    fi
-
-    # Additional secondary nodes if cores permit
-    local remaining=$((CORES_PER_TARGET - node_count))
-    for i in $(seq 1 $remaining); do
-        local slave_cmd
-        slave_cmd=$(build_afl_cmd "$harness" "$corpus_path" "$output_dir" "$dict" "-S slave_$i")
-        tmux split-window -v -t "$SESSION:$window_name" \
-            "cd '$SCRIPT_DIR' && $slave_cmd; read"
-    done
-
-    echo "[+] $window_name: master + $([ $has_cmplog = true ] && [ $CORES_PER_TARGET -ge 2 ] && echo "cmplog + " || true)$((CORES_PER_TARGET - node_count)) secondary nodes"
+launch_bg() {
+    local env_prefix="$1"
+    local cmd="$2"
+    local logfile="$3"
+    (cd "$SCRIPT_DIR" && AFL_NO_UI=1 $env_prefix $cmd > "$logfile" 2>&1) &
+    BG_PIDS+=($!)
 }
 
-# Launch the three campaigns
-launch_target "auth_header"    "fuzz_auth_header"    "auth_header"    "http.dict"
-launch_target "websocket_auth" "fuzz_websocket_auth" "websocket_auth" "json.dict"
-launch_target "http_parsing"   "fuzz_http_parsing"   "http_parsing"   "http.dict"
+bg_count=0
 
-# Add a status window
+for target_info in "fuzz_websocket_auth|websocket_auth|json.dict|" "fuzz_http_parsing|http_parsing|http.dict|$HTTP_ENV"; do
+    IFS='|' read -r harness corpus_dir dict env_prefix <<< "$target_info"
+    output="output/$corpus_dir"
+    corpus="corpus/$corpus_dir"
+    logdir="$SCRIPT_DIR/output/$corpus_dir"
+
+    # CmpLog secondary (if binary exists and we have cores)
+    if [ -x "$SCRIPT_DIR/${harness}_cmplog" ] && [ "$CORES_PER_TARGET" -ge 2 ]; then
+        cmd=$(build_afl_cmd "$harness" "$corpus" "$output" "$dict" "-S cmplog" "-c ./${harness}_cmplog")
+        launch_bg "$env_prefix" "$cmd" "$logdir/cmplog.log"
+        bg_count=$((bg_count + 1))
+    fi
+
+    # Extra secondaries
+    used=2  # main + cmplog
+    remaining=$((CORES_PER_TARGET - used))
+    for i in $(seq 1 $remaining); do
+        cmd=$(build_afl_cmd "$harness" "$corpus" "$output" "$dict" "-S sec_$i")
+        launch_bg "$env_prefix" "$cmd" "$logdir/sec_$i.log"
+        bg_count=$((bg_count + 1))
+    done
+done
+
+echo "[*] Launched $bg_count headless secondary nodes"
+
+# ── Create tmux: 2 panes (main nodes with UI) ────────────────────────────────
+ws_main=$(build_afl_cmd "fuzz_websocket_auth" "corpus/websocket_auth" "output/websocket_auth" "json.dict" "-M main")
+http_main=$(build_afl_cmd "fuzz_http_parsing" "corpus/http_parsing" "output/http_parsing" "http.dict" "-M main")
+
+tmux new-session -d -s "$SESSION" -n "fuzzers" \
+    "cd '$SCRIPT_DIR' && $ws_main; echo '[!] Fuzzer exited'; read"
+tmux split-window -h -t "$SESSION:fuzzers" \
+    "cd '$SCRIPT_DIR' && $HTTP_ENV $http_main; echo '[!] Fuzzer exited'; read"
+
+# ── Status window ─────────────────────────────────────────────────────────────
 tmux new-window -t "$SESSION" -n "status" \
-    "cd '$SCRIPT_DIR' && watch -n 5 'afl-whatsup -s output/ 2>/dev/null || echo \"=== Auth Header ===\"; cat output/auth_header/main/fuzzer_stats 2>/dev/null | grep -E \"(execs_done|execs_per_sec|saved_crashes|saved_hangs|last_find)\"; echo; echo \"=== WebSocket Auth ===\"; cat output/websocket_auth/main/fuzzer_stats 2>/dev/null | grep -E \"(execs_done|execs_per_sec|saved_crashes|saved_hangs|last_find)\"; echo; echo \"=== HTTP Parsing ===\"; cat output/http_parsing/main/fuzzer_stats 2>/dev/null | grep -E \"(execs_done|execs_per_sec|saved_crashes|saved_hangs|last_find)\"'"
+    "cd '$SCRIPT_DIR' && watch -n 10 'echo \"=== WebSocket Auth ===\"; echo; afl-whatsup -s output/websocket_auth 2>&1; echo; echo \"=== HTTP Parsing ===\"; echo; afl-whatsup -s output/http_parsing 2>&1'"
 
-# Select first window
-tmux select-window -t "$SESSION:0"
+# Select fuzzers window
+tmux select-window -t "$SESSION:fuzzers"
+
+# Save background PIDs so clean.sh can kill them
+printf '%s\n' "${BG_PIDS[@]}" > "$SCRIPT_DIR/.bg_fuzz_pids"
 
 echo
 echo "[+] All fuzzers started in tmux session: $SESSION"
+echo "    2 main nodes (visible) + $bg_count headless secondaries"
 echo
 echo "Commands:"
 echo "  tmux attach -t $SESSION          # Attach to session"
-echo "  tmux select-window -t $SESSION:0 # auth_header"
-echo "  tmux select-window -t $SESSION:1 # websocket_auth"
-echo "  tmux select-window -t $SESSION:2 # http_parsing"
-echo "  tmux select-window -t $SESSION:3 # status overview"
 echo "  Ctrl-b d                         # Detach (fuzzers keep running)"
 echo "  tmux kill-session -t $SESSION    # Stop all fuzzers"
 echo

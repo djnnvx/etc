@@ -45,6 +45,15 @@ if tmux has-session -t ttyd-fuzz 2>/dev/null; then
     echo "[+] Fuzzer session killed"
 fi
 
+# Kill headless background fuzzer processes
+if [ -f "$SCRIPT_DIR/.bg_fuzz_pids" ]; then
+    while read -r pid; do
+        kill "$pid" 2>/dev/null || true
+    done < "$SCRIPT_DIR/.bg_fuzz_pids"
+    rm -f "$SCRIPT_DIR/.bg_fuzz_pids"
+    echo "[+] Killed headless fuzzer processes"
+fi
+
 # ── remove crontab entry ──────────────────────────────────────────────────────
 CRONTAB_MARKER="# ttyd-fuzz-crash-backup"
 CURRENT_CRON=$(crontab -l 2>/dev/null || true)
@@ -108,7 +117,7 @@ fi
 
 # ── remove compiled harness binaries ─────────────────────────────────────────
 REMOVED=0
-for binary in fuzz_auth_header fuzz_websocket_auth fuzz_http_parsing; do
+for binary in fuzz_websocket_auth fuzz_http_parsing; do
     for suffix in "" "_cmplog" "_lf"; do
         target="$SCRIPT_DIR/${binary}${suffix}"
         if [ -f "$target" ]; then
@@ -117,28 +126,26 @@ for binary in fuzz_auth_header fuzz_websocket_auth fuzz_http_parsing; do
         fi
     done
 done
-[ "$REMOVED" -gt 0 ] && echo "[+] Removed $REMOVED compiled binaries" \
+if [ -f "$SCRIPT_DIR/http_mutator.so" ]; then
+    rm -f "$SCRIPT_DIR/http_mutator.so"
+    REMOVED=$((REMOVED + 1))
+fi
+[ "$REMOVED" -gt 0 ] && echo "[+] Removed $REMOVED compiled binaries/libraries" \
                       || echo "[*] No binaries to remove"
 
-# ── remove generated mock files ───────────────────────────────────────────────
-for f in fuzz_lws_mock.c fuzz_lws_mock.h mock_server_globals.c mock_pty_stubs.c backup_crashes.sh; do
-    if [ -f "$SCRIPT_DIR/$f" ]; then
-        rm -f "$SCRIPT_DIR/$f"
-        echo "[+] Removed $f"
-    fi
-done
+# ── remove build artifacts (NOT tracked source files) ─────────────────────────
+# fuzz_lws_mock.{c,h}, mock_server_globals.c, mock_pty_stubs.c, and
+# fuzz-include/{libwebsockets,uv}.h are tracked source — keep them.
+if [ -f "$SCRIPT_DIR/backup_crashes.sh" ]; then
+    rm -f "$SCRIPT_DIR/backup_crashes.sh"
+    echo "[+] Removed backup_crashes.sh"
+fi
 
-# ── remove instrumented objects and mock headers ──────────────────────────────
+# ── remove instrumented objects ───────────────────────────────────────────────
 if [ -d "$SCRIPT_DIR/ttyd-obj" ]; then
     echo "[*] Removing ttyd-obj/"
     rm -rf "$SCRIPT_DIR/ttyd-obj"
     echo "[+] ttyd-obj/ removed"
-fi
-
-if [ -d "$SCRIPT_DIR/fuzz-include" ]; then
-    echo "[*] Removing fuzz-include/"
-    rm -rf "$SCRIPT_DIR/fuzz-include"
-    echo "[+] fuzz-include/ removed"
 fi
 
 # ── optionally remove the ttyd source clone ───────────────────────────────────
