@@ -5,8 +5,12 @@ Creates structured binary seeds in corpus/{websocket_auth,http_parsing}/.
 Run from the script directory or pass the output base dir as argv[1].
 
 Formats:
-  websocket_auth: [has_credential:1][cred_len:2 BE][credential][json_message]
-  http_parsing:   [auth_mode:1][cred_len:2 BE][credential][path_len:2 BE][path][auth_header_value]
+  websocket_auth: [flags:1][cred_len:2 BE][cred][path_len:1][path]
+                  [origin_len:1][origin][host_len:1][host][ws_message]
+    flags: bit0=has_cred, bit1=auth_header, bit2=check_origin,
+           bit3=url_arg, bit4=writable
+
+  http_parsing:   [auth_mode:1][cred_len:2 BE][cred][path_len:2 BE][path][auth_header_value]
 """
 
 import os
@@ -27,9 +31,16 @@ def write_seeds(subdir, seeds):
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def ws_seed(has_cred, cred, json_msg):
-    """websocket_auth format: [has_credential:1][cred_len:2 BE][credential][json]"""
-    return struct.pack(">B", has_cred) + struct.pack(">H", len(cred)) + cred + json_msg
+def ws_seed(flags, cred, path, origin, host, ws_msg):
+    """websocket_auth format:
+    [flags:1][cred_len:2 BE][cred][path_len:1][path]
+    [origin_len:1][origin][host_len:1][host][ws_message]"""
+    return (struct.pack(">B", flags)
+            + struct.pack(">H", len(cred)) + cred
+            + struct.pack(">B", len(path)) + path
+            + struct.pack(">B", len(origin)) + origin
+            + struct.pack(">B", len(host)) + host
+            + ws_msg)
 
 
 def http_seed(mode, cred, path, auth=b""):
@@ -41,35 +52,108 @@ def http_seed(mode, cred, path, auth=b""):
 
 
 # ── websocket_auth seeds ─────────────────────────────────────────────────────
+# Flags: 0x01=has_cred, 0x02=auth_header, 0x04=check_origin, 0x08=url_arg, 0x10=writable
+
+WS = b"/ws"
+ORIGIN = b"http://localhost:7681"
+HOST = b"localhost:7681"
+JSON_AUTH = b'{"columns":80,"rows":24,"AuthToken":"admin"}'
+JSON_DIMS = b'{"columns":80,"rows":24}'
 
 ws_seeds = {
-    "noauth_normal":       ws_seed(0, b"", b'{"columns":80,"rows":24}'),
-    "noauth_large_term":   ws_seed(0, b"", b'{"columns":200,"rows":50}'),
-    "noauth_empty_json":   ws_seed(0, b"", b"{}"),
-    "noauth_with_token":   ws_seed(0, b"", b'{"columns":80,"rows":24,"AuthToken":"ignored"}'),
-    "auth_valid":          ws_seed(1, b"admin", b'{"columns":80,"rows":24,"AuthToken":"admin"}'),
-    "auth_invalid":        ws_seed(1, b"admin", b'{"columns":80,"rows":24,"AuthToken":"wrong"}'),
-    "auth_missing_token":  ws_seed(1, b"admin", b'{"columns":80,"rows":24}'),
-    "auth_no_dimensions":  ws_seed(1, b"admin", b'{"AuthToken":"admin"}'),
-    "auth_empty_cred":     ws_seed(1, b"",      b'{"columns":80,"rows":24}'),
-    "json_malformed":      ws_seed(0, b"", b"{invalid json}"),
-    "json_truncated":      ws_seed(0, b"", b'{"columns":'),
-    "json_empty":          ws_seed(0, b"", b""),
-    "json_array":          ws_seed(1, b"foo", b"[1,2,3]"),
-    "json_huge_values":    ws_seed(0, b"", b'{"columns":99999,"rows":99999}'),
-    "json_negative":       ws_seed(0, b"", b'{"columns":-1,"rows":-1}'),
-    "json_uint16_max":     ws_seed(0, b"", b'{"columns":65535,"rows":65535}'),
-    "json_uint16_overflow":ws_seed(0, b"", b'{"columns":65536,"rows":65536}'),
-    "json_extra_ws":       ws_seed(0, b"", b'{  "columns" : 80 , "rows" : 24  }'),
-    "json_deep_nested":    ws_seed(0, b"", b'{"a":' * 50 + b"1" + b"}" * 50),
-    "json_huge_token":     ws_seed(1, b"admin",
-                                   b'{"columns":80,"rows":24,"AuthToken":"' + b"A" * 5000 + b'"}'),
-    "auth_token_bool":     ws_seed(1, b"admin", b'{"columns":80,"rows":24,"AuthToken":true}'),
-    "auth_token_null":     ws_seed(1, b"admin", b'{"columns":80,"rows":24,"AuthToken":null}'),
-    "auth_token_int":      ws_seed(1, b"admin", b'{"columns":80,"rows":24,"AuthToken":12345}'),
-    "auth_token_dup":      ws_seed(1, b"admin", b'{"AuthToken":"wrong","AuthToken":"admin"}'),
-    "auth_long_cred":      ws_seed(1, b"A" * 200,
-                                   b'{"AuthToken":"' + b"A" * 200 + b'"}'),
+    # ── No auth, basic JSON_DATA command ──
+    "noauth_json":          ws_seed(0x10, b"", WS, b"", b"", JSON_DIMS),
+    "noauth_json_large":    ws_seed(0x10, b"", WS, b"", b"", b'{"columns":200,"rows":50}'),
+    "noauth_json_empty":    ws_seed(0x10, b"", WS, b"", b"", b"{}"),
+    "noauth_json_malformed":ws_seed(0x10, b"", WS, b"", b"", b"{invalid json}"),
+
+    # ── With credential — JSON_DATA auth flow ──
+    "auth_valid":           ws_seed(0x11, b"admin", WS, b"", b"", JSON_AUTH),
+    "auth_invalid":         ws_seed(0x11, b"admin", WS, b"", b"",
+                                    b'{"columns":80,"rows":24,"AuthToken":"wrong"}'),
+    "auth_missing_token":   ws_seed(0x11, b"admin", WS, b"", b"", JSON_DIMS),
+    "auth_no_dims":         ws_seed(0x11, b"admin", WS, b"", b"", b'{"AuthToken":"admin"}'),
+    "auth_empty_cred":      ws_seed(0x01, b"", WS, b"", b"", JSON_DIMS),
+    "auth_token_null":      ws_seed(0x11, b"admin", WS, b"", b"",
+                                    b'{"columns":80,"rows":24,"AuthToken":null}'),
+    "auth_token_bool":      ws_seed(0x11, b"admin", WS, b"", b"",
+                                    b'{"columns":80,"rows":24,"AuthToken":true}'),
+    "auth_long_cred":       ws_seed(0x11, b"A" * 200, WS, b"", b"",
+                                    b'{"AuthToken":"' + b"A" * 200 + b'"}'),
+
+    # ── Custom auth header (bit 1) ──
+    "custom_auth":          ws_seed(0x12, b"someuser", WS, b"", b"", JSON_DIMS),
+    "custom_auth_empty":    ws_seed(0x02, b"", WS, b"", b"", JSON_DIMS),
+
+    # ── INPUT command ('0' prefix) ──
+    "input_hello":          ws_seed(0x10, b"", WS, b"", b"", b"0hello world"),
+    "input_ctrl_c":         ws_seed(0x10, b"", WS, b"", b"", b"0\x03"),
+    "input_long":           ws_seed(0x10, b"", WS, b"", b"", b"0" + b"A" * 4096),
+    "input_not_writable":   ws_seed(0x00, b"", WS, b"", b"", b"0hello"),
+
+    # ── RESIZE command ('1' prefix) ──
+    "resize_normal":        ws_seed(0x10, b"", WS, b"", b"",
+                                    b'1{"columns":120,"rows":40}'),
+    "resize_huge":          ws_seed(0x10, b"", WS, b"", b"",
+                                    b'1{"columns":65535,"rows":65535}'),
+    "resize_negative":      ws_seed(0x10, b"", WS, b"", b"",
+                                    b'1{"columns":-1,"rows":-1}'),
+
+    # ── PAUSE/RESUME commands ──
+    "pause":                ws_seed(0x10, b"", WS, b"", b"", b"2"),
+    "resume":               ws_seed(0x10, b"", WS, b"", b"", b"3"),
+
+    # ── Unknown command ──
+    "unknown_cmd":          ws_seed(0x10, b"", WS, b"", b"", b"Xunknown"),
+
+    # ── Origin checking (bit 2) ──
+    "origin_match":         ws_seed(0x14, b"", WS, ORIGIN, HOST, JSON_DIMS),
+    "origin_mismatch":      ws_seed(0x14, b"", WS, b"http://evil.com", HOST, JSON_DIMS),
+    "origin_no_host":       ws_seed(0x14, b"", WS, ORIGIN, b"", JSON_DIMS),
+    "origin_no_origin":     ws_seed(0x14, b"", WS, b"", HOST, JSON_DIMS),
+    "origin_long":          ws_seed(0x14, b"", WS,
+                                    b"http://" + b"A" * 200 + b":9999",
+                                    b"A" * 200 + b":9999", JSON_DIMS),
+    "origin_port_80":       ws_seed(0x14, b"", WS,
+                                    b"http://localhost:80", b"localhost", JSON_DIMS),
+    "origin_port_443":      ws_seed(0x14, b"", WS,
+                                    b"https://localhost:443", b"localhost", JSON_DIMS),
+
+    # ── URL args (bit 3) ──
+    "url_arg_enabled":      ws_seed(0x18, b"", WS, b"", b"", b"0echo test"),
+    "url_arg_long":         ws_seed(0x18, b"", WS, b"", b"", b"0" + b"X" * 250),
+
+    # ── Path variations ──
+    "path_wrong":           ws_seed(0x10, b"", b"/wrong", b"", b"", JSON_DIMS),
+    "path_empty":           ws_seed(0x10, b"", b"", b"", b"", JSON_DIMS),
+    "path_traversal":       ws_seed(0x10, b"", b"/../ws", b"", b"", JSON_DIMS),
+    "path_long":            ws_seed(0x10, b"", b"/" + b"A" * 200, b"", b"", JSON_DIMS),
+    "path_null":            ws_seed(0x10, b"", b"/ws\x00extra", b"", b"", JSON_DIMS),
+
+    # ── Auth + origin combined ──
+    "auth_origin_valid":    ws_seed(0x15, b"admin", WS, ORIGIN, HOST, JSON_AUTH),
+    "auth_origin_invalid":  ws_seed(0x15, b"admin", WS, b"http://evil.com", HOST, JSON_AUTH),
+
+    # ── Empty / minimal ──
+    "empty_msg":            ws_seed(0x10, b"", WS, b"", b"", b""),
+    "minimal":              ws_seed(0x00, b"", b"", b"", b"", b""),
+
+    # ── JSON edge cases ──
+    "json_deep_nested":     ws_seed(0x10, b"", WS, b"", b"",
+                                    b'{"a":' * 50 + b"1" + b"}" * 50),
+    "json_huge_token":      ws_seed(0x11, b"admin", WS, b"", b"",
+                                    b'{"columns":80,"rows":24,"AuthToken":"' + b"A" * 5000 + b'"}'),
+    "json_truncated":       ws_seed(0x10, b"", WS, b"", b"", b'{"columns":'),
+    "json_extra_ws":        ws_seed(0x10, b"", WS, b"", b"",
+                                    b'{  "columns" : 80 , "rows" : 24  }'),
+    "json_uint16_overflow": ws_seed(0x10, b"", WS, b"", b"",
+                                    b'{"columns":65536,"rows":65536}'),
+
+    # ── Authenticated commands (need JSON_DATA first to auth) ──
+    # Note: without auth, non-JSON_DATA commands with credential set get rejected
+    "unauth_input":         ws_seed(0x11, b"admin", WS, b"", b"", b"0hello"),
+    "unauth_resize":        ws_seed(0x11, b"admin", WS, b"", b"",
+                                    b'1{"columns":80,"rows":24}'),
 }
 
 

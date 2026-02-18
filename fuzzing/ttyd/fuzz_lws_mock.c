@@ -7,34 +7,68 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 /* ── fuzzer-controlled state ─────────────────────────────────────────── */
 char _fuzz_auth_header[4096];
 int  _fuzz_auth_header_len;
 char _fuzz_custom_header[4096];
 int  _fuzz_custom_header_len;
+char _fuzz_uri_path[4096];
+int  _fuzz_uri_path_len;
+char _fuzz_origin[4096];
+int  _fuzz_origin_len;
+char _fuzz_host[4096];
+int  _fuzz_host_len;
+
+char _fuzz_uri_args[FUZZ_MAX_URI_ARGS][256];
+int  _fuzz_uri_args_len[FUZZ_MAX_URI_ARGS];
+int  _fuzz_uri_args_count;
 
 void fuzz_lws_reset(void) {
     memset(_fuzz_auth_header,   0, sizeof(_fuzz_auth_header));
     _fuzz_auth_header_len   = 0;
     memset(_fuzz_custom_header, 0, sizeof(_fuzz_custom_header));
     _fuzz_custom_header_len = 0;
+    memset(_fuzz_uri_path, 0, sizeof(_fuzz_uri_path));
+    _fuzz_uri_path_len = 0;
+    memset(_fuzz_origin, 0, sizeof(_fuzz_origin));
+    _fuzz_origin_len = 0;
+    memset(_fuzz_host, 0, sizeof(_fuzz_host));
+    _fuzz_host_len = 0;
+    memset(_fuzz_uri_args, 0, sizeof(_fuzz_uri_args));
+    memset(_fuzz_uri_args_len, 0, sizeof(_fuzz_uri_args_len));
+    _fuzz_uri_args_count = 0;
 }
 
 /* ── header accessors ────────────────────────────────────────────────── */
-int lws_hdr_copy(struct lws *wsi, char *dest, int len,
-                 enum lws_token_indexes h) {
-    const char *src = NULL;
-    int srclen = 0;
-    if (h == WSI_TOKEN_HTTP_AUTHORIZATION) {
-        src    = _fuzz_auth_header;
-        srclen = _fuzz_auth_header_len;
-    }
-    if (!src || !dest || len <= 0) { if (dest && len > 0) dest[0] = '\0'; return 0; }
+
+/* Helper: copy from a source buffer into dest, return bytes copied */
+static int copy_hdr(char *dest, int len, const char *src, int srclen) {
+    if (!dest || len <= 0) return 0;
+    if (!src || srclen <= 0) { dest[0] = '\0'; return 0; }
     int n = srclen < len - 1 ? srclen : len - 1;
     memcpy(dest, src, n);
     dest[n] = '\0';
     return n;
+}
+
+int lws_hdr_copy(struct lws *wsi, char *dest, int len,
+                 enum lws_token_indexes h) {
+    switch (h) {
+    case WSI_TOKEN_HTTP_AUTHORIZATION:
+        return copy_hdr(dest, len, _fuzz_auth_header, _fuzz_auth_header_len);
+    case WSI_TOKEN_GET_URI:
+    case WSI_TOKEN_HTTP_COLON_PATH:
+        return copy_hdr(dest, len, _fuzz_uri_path, _fuzz_uri_path_len);
+    case WSI_TOKEN_ORIGIN:
+        return copy_hdr(dest, len, _fuzz_origin, _fuzz_origin_len);
+    case WSI_TOKEN_HOST:
+        return copy_hdr(dest, len, _fuzz_host, _fuzz_host_len);
+    default:
+        if (dest && len > 0) dest[0] = '\0';
+        return 0;
+    }
 }
 
 int lws_hdr_custom_length(struct lws *wsi, const char *name, int nlen) {
@@ -43,26 +77,65 @@ int lws_hdr_custom_length(struct lws *wsi, const char *name, int nlen) {
 
 int lws_hdr_custom_copy(struct lws *wsi, char *dst, int len,
                          const char *name, int nlen) {
-    if (!dst || len <= 0) return 0;
-    int n = _fuzz_custom_header_len < len - 1 ? _fuzz_custom_header_len : len - 1;
-    memcpy(dst, _fuzz_custom_header, n);
-    dst[n] = '\0';
-    return n;
+    return copy_hdr(dst, len, _fuzz_custom_header, _fuzz_custom_header_len);
 }
 
 int lws_hdr_copy_fragment(struct lws *wsi, char *dst, int len,
                            enum lws_token_indexes h, int frag_idx) {
+    if (h == WSI_TOKEN_HTTP_URI_ARGS &&
+        frag_idx < _fuzz_uri_args_count && frag_idx < FUZZ_MAX_URI_ARGS) {
+        return copy_hdr(dst, len,
+                        _fuzz_uri_args[frag_idx],
+                        _fuzz_uri_args_len[frag_idx]);
+    }
     if (dst && len > 0) dst[0] = '\0';
     return 0;
 }
 
 /* ── URI parsing ─────────────────────────────────────────────────────── */
+/* Simple parser that extracts protocol, host, port, path from a URI.
+ * Modifies the input string in-place (like the real lws_parse_uri).     */
 int lws_parse_uri(char *p, const char **prot, const char **host,
                   int *port, const char **path) {
-    if (prot)  *prot  = "";
-    if (host)  *host  = "";
-    if (port)  *port  = 0;
-    if (path)  *path  = p ? p : "";
+    if (!p || !*p) {
+        if (prot)  *prot  = "";
+        if (host)  *host  = "";
+        if (port)  *port  = 0;
+        if (path)  *path  = "";
+        return -1;
+    }
+
+    /* Find protocol: "http://" or "https://" etc. */
+    char *sep = strstr(p, "://");
+    if (sep) {
+        *sep = '\0';
+        if (prot) *prot = p;
+        p = sep + 3;
+    } else {
+        if (prot) *prot = "";
+    }
+
+    /* host[:port][/path] */
+    if (host) *host = p;
+
+    /* Find path separator */
+    char *slash = strchr(p, '/');
+    if (slash) {
+        if (path) *path = slash + 1;
+        *slash = '\0';
+    } else {
+        if (path) *path = "";
+    }
+
+    /* Find port in host part */
+    char *colon = strchr(p, ':');
+    if (colon) {
+        *colon = '\0';
+        if (port) *port = atoi(colon + 1);
+    } else {
+        if (port) *port = 0;
+    }
+
     return 0;
 }
 
