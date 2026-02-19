@@ -582,9 +582,9 @@ EOF
 pty_buf_t *pty_buf_init(char *base, size_t len)         { return NULL; }
 void       pty_buf_free(pty_buf_t *buf)                  {}
 pty_process *process_init(void *ctx, uv_loop_t *loop,
-                           char *argv[], char *envp[])   { return NULL; }
+                           char *argv[], char *envp[])   { return calloc(1, sizeof(pty_process)); }
 bool       process_running(pty_process *process)         { return false; }
-void       process_free(pty_process *process)            {}
+void       process_free(pty_process *process)            { free(process); }
 int        pty_spawn(pty_process *process,
                      pty_read_cb read_cb,
                      pty_exit_cb exit_cb)                { return -1; }
@@ -976,7 +976,7 @@ $CC $COMMON_CFLAGS fuzz_websocket_auth.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS -o 
 echo "[+] Built: fuzz_websocket_auth$SUFFIX"
 
 echo "[*] Building fuzz_http_parsing..."
-$CC $COMMON_CFLAGS fuzz_http_parsing.c $MOCK_OBJS $JSON_C_LIBS -o fuzz_http_parsing$SUFFIX
+$CC $COMMON_CFLAGS fuzz_http_parsing.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS -o fuzz_http_parsing$SUFFIX
 echo "[+] Built: fuzz_http_parsing$SUFFIX"
 
 # CmpLog variants (AFL++ only)
@@ -988,7 +988,7 @@ if [ "$MODE" = "afl" ]; then
             -o ${target}_cmplog
         echo "[+] Built: ${target}_cmplog"
     done
-    AFL_LLVM_CMPLOG=1 $CC $COMMON_CFLAGS fuzz_http_parsing.c $MOCK_OBJS $JSON_C_LIBS \
+    AFL_LLVM_CMPLOG=1 $CC $COMMON_CFLAGS fuzz_http_parsing.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS \
         -o fuzz_http_parsing_cmplog
     echo "[+] Built: fuzz_http_parsing_cmplog"
 fi
