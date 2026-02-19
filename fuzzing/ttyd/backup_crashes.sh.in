@@ -1,0 +1,29 @@
+#!/bin/bash
+# Backs up AFL++ crashes to a dated archive
+# Populated by build_fuzzers.sh at build time
+# %%CRONTAB_MARKER%%
+SCRIPT_DIR="%%SCRIPT_DIR%%"
+BACKUP_DIR="%%BACKUP_DIR%%"
+OUTPUT_DIR="$SCRIPT_DIR/output"
+
+mkdir -p "$BACKUP_DIR"
+
+HAS_CRASHES=false
+for crash_dir in "$OUTPUT_DIR"/*/main/crashes "$OUTPUT_DIR"/*/cmplog/crashes; do
+    [ -d "$crash_dir" ] || continue
+    count=$(find "$crash_dir" -maxdepth 1 -name 'id:*' 2>/dev/null | wc -l)
+    [ "$count" -gt 0 ] || continue
+    HAS_CRASHES=true
+    break
+done
+
+$HAS_CRASHES || exit 0
+
+STAMP=$(date +%Y%m%d_%H%M%S)
+ARCHIVE="$BACKUP_DIR/crashes_${STAMP}.tar.gz"
+tar -czf "$ARCHIVE" \
+    --exclude='README.txt' \
+    $(find "$OUTPUT_DIR" -type d -name 'crashes' 2>/dev/null | tr '\n' ' ') \
+    2>/dev/null || true
+
+echo "[$(date)] Backed up crashes → $ARCHIVE" >> "$BACKUP_DIR/backup.log"
