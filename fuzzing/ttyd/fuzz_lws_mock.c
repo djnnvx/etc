@@ -25,6 +25,9 @@ char _fuzz_uri_args[FUZZ_MAX_URI_ARGS][256];
 int  _fuzz_uri_args_len[FUZZ_MAX_URI_ARGS];
 int  _fuzz_uri_args_count;
 
+int    _fuzz_is_final_fragment = 1;
+size_t _fuzz_remaining_payload = 0;
+
 void fuzz_lws_reset(void) {
     memset(_fuzz_auth_header,   0, sizeof(_fuzz_auth_header));
     _fuzz_auth_header_len   = 0;
@@ -39,6 +42,8 @@ void fuzz_lws_reset(void) {
     memset(_fuzz_uri_args, 0, sizeof(_fuzz_uri_args));
     memset(_fuzz_uri_args_len, 0, sizeof(_fuzz_uri_args_len));
     _fuzz_uri_args_count = 0;
+    _fuzz_is_final_fragment = 1;
+    _fuzz_remaining_payload = 0;
 }
 
 /* ── header accessors ────────────────────────────────────────────────── */
@@ -163,8 +168,8 @@ void lws_set_timeout(struct lws *wsi, enum pending_timeout reason, int secs) {}
 void lws_close_reason(struct lws *wsi, int status,
                        unsigned char *buf, size_t len) {}
 struct lws_context *lws_get_context(const struct lws *wsi) { return NULL; }
-int lws_is_final_fragment(struct lws *wsi) { return 1; }
-size_t lws_remaining_packet_payload(struct lws *wsi) { return 0; }
+int lws_is_final_fragment(struct lws *wsi) { return _fuzz_is_final_fragment; }
+size_t lws_remaining_packet_payload(struct lws *wsi) { return _fuzz_remaining_payload; }
 int lws_get_peer_simple(struct lws *wsi, char *name, size_t namelen) {
     if (name && namelen > 0) { strncpy(name, "127.0.0.1", namelen - 1); name[namelen-1] = '\0'; }
     return 0;

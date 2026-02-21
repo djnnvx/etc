@@ -204,11 +204,132 @@ http_seeds = {
 }
 
 
+# ── ws_fragments seeds ────────────────────────────────────────────────────────
+# Format: [num_frags:1][cmd:1][payload...]
+
+def frags_seed(num_frags, cmd, payload):
+    return bytes([num_frags & 0x07, cmd]) + payload
+
+CMD_JSON  = ord('{')
+CMD_INPUT = ord('0')
+CMD_RESIZE= ord('1')
+CMD_PAUSE = ord('2')
+
+ws_frags_seeds = {
+    "single_json":     frags_seed(1, CMD_JSON,  b'{"columns":80,"rows":24}'),
+    "two_json":        frags_seed(2, CMD_JSON,  b'{"columns":80,"rows":24}'),
+    "four_json":       frags_seed(4, CMD_JSON,  b'{"columns":200,"rows":50}abcdef'),
+    "single_resize":   frags_seed(1, CMD_RESIZE,b'{"columns":120,"rows":40}'),
+    "three_resize":    frags_seed(3, CMD_RESIZE,b'{"columns":120,"rows":40}padding'),
+    "single_input":    frags_seed(1, CMD_INPUT, b'hello world'),
+    "two_input":       frags_seed(2, CMD_INPUT, b'hello world long payload here'),
+    "eight_input":     frags_seed(8, CMD_INPUT, b'A' * 64),
+    "single_pause":    frags_seed(1, CMD_PAUSE, b''),
+    "large_single":    frags_seed(1, CMD_INPUT, b'X' * 512),
+    "malformed_json":  frags_seed(2, CMD_JSON,  b'{invalid'),
+    "empty_payload":   frags_seed(1, CMD_JSON,  b'{}'),
+}
+
+# ── prefs_message seeds ───────────────────────────────────────────────────────
+# Format: [prefs_len:2 BE][prefs_json][cmd_len:2 BE][command]
+
+def prefs_seed(prefs, command):
+    return (struct.pack(">H", len(prefs)) + prefs +
+            struct.pack(">H", len(command)) + command)
+
+prefs_seeds = {
+    "normal":          prefs_seed(b'{}',                      b'bash'),
+    "prefs_medium":    prefs_seed(b'{"theme":"light"}',       b'bash'),
+    "prefs_boundary":  prefs_seed(b'{"x":"' + b'A'*4080 + b'"}', b'bash'),
+    "prefs_overflow":  prefs_seed(b'A' * 4097,               b'bash'),
+    "prefs_overflow2": prefs_seed(b'A' * 8192,               b'bash'),
+    "cmd_medium":      prefs_seed(b'{}',                      b'/bin/bash'),
+    "cmd_boundary":    prefs_seed(b'{}',                      b'/bin/' + b'A'*3965),
+    "cmd_overflow":    prefs_seed(b'{}',                      b'A' * 4000),
+    "both_large":      prefs_seed(b'A' * 3000,               b'B' * 3000),
+    "empty_prefs":     prefs_seed(b'',                        b'bash'),
+    "empty_cmd":       prefs_seed(b'{}',                      b''),
+    "fmt_string":      prefs_seed(b'%s%s%n%n',               b'%s%n'),
+}
+
+# ── json_recv seeds ───────────────────────────────────────────────────────────
+# Format: [num_msgs:1][cmd:1][len:2 BE][payload...] × N
+
+def recv_msg(cmd, payload):
+    return bytes([cmd]) + struct.pack(">H", len(payload)) + payload
+
+def recv_seed(*messages):
+    n = min(len(messages), 4)
+    return bytes([n & 0x03]) + b''.join(messages[:n])
+
+JSON_DATA = ord('{')
+RESIZE    = ord('1')
+INPUT_CMD = ord('0')
+PAUSE_CMD = ord('2')
+RESUME_CMD= ord('3')
+
+json_recv_seeds = {
+    # Single JSON_DATA
+    "json_only":        recv_seed(recv_msg(JSON_DATA, b'{"columns":80,"rows":24}')),
+    "json_empty":       recv_seed(recv_msg(JSON_DATA, b'{}')),
+    "json_malformed":   recv_seed(recv_msg(JSON_DATA, b'{invalid}')),
+    "json_huge_cols":   recv_seed(recv_msg(JSON_DATA, b'{"columns":65535,"rows":65535}')),
+    "json_neg":         recv_seed(recv_msg(JSON_DATA, b'{"columns":-1,"rows":-1}')),
+    "json_overflow16":  recv_seed(recv_msg(JSON_DATA, b'{"columns":65536,"rows":65536}')),
+    "json_deep":        recv_seed(recv_msg(JSON_DATA, b'{"a":' * 30 + b'1' + b'}' * 30)),
+    "json_long_str":    recv_seed(recv_msg(JSON_DATA, b'{"columns":80,"rows":24,"x":"' + b'A'*500 + b'"}')),
+
+    # JSON_DATA then RESIZE
+    "json_then_resize": recv_seed(
+        recv_msg(JSON_DATA, b'{"columns":80,"rows":24}'),
+        recv_msg(RESIZE,    b'{"columns":120,"rows":40}'),
+    ),
+    "json_then_resize_bad": recv_seed(
+        recv_msg(JSON_DATA, b'{"columns":80,"rows":24}'),
+        recv_msg(RESIZE,    b'{bad json'),
+    ),
+
+    # JSON_DATA then INPUT
+    "json_then_input":  recv_seed(
+        recv_msg(JSON_DATA, b'{"columns":80,"rows":24}'),
+        recv_msg(INPUT_CMD, b'ls -la\n'),
+    ),
+
+    # JSON_DATA then PAUSE/RESUME
+    "json_pause_resume":recv_seed(
+        recv_msg(JSON_DATA,  b'{"columns":80,"rows":24}'),
+        recv_msg(PAUSE_CMD,  b''),
+        recv_msg(RESUME_CMD, b''),
+    ),
+
+    # Four messages
+    "full_sequence":    recv_seed(
+        recv_msg(JSON_DATA,  b'{"columns":80,"rows":24}'),
+        recv_msg(RESIZE,     b'{"columns":160,"rows":50}'),
+        recv_msg(INPUT_CMD,  b'echo hello\n'),
+        recv_msg(PAUSE_CMD,  b''),
+    ),
+
+    # RESIZE before JSON_DATA (pss->process == NULL → no-op in RESIZE)
+    "resize_first":     recv_seed(recv_msg(RESIZE, b'{"columns":80,"rows":24}')),
+
+    # Unknown command
+    "unknown_cmd":      recv_seed(recv_msg(ord('Z'), b'some data')),
+    "unknown_two":      recv_seed(
+        recv_msg(JSON_DATA, b'{"columns":80,"rows":24}'),
+        recv_msg(ord('X'),  b'garbage'),
+    ),
+}
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    write_seeds("websocket_auth", ws_seeds)
-    write_seeds("http_parsing", http_seeds)
+    write_seeds("websocket_auth",  ws_seeds)
+    write_seeds("http_parsing",    http_seeds)
+    write_seeds("ws_fragments",    ws_frags_seeds)
+    write_seeds("prefs_message",   prefs_seeds)
+    write_seeds("json_recv",       json_recv_seeds)
 
-    total = len(ws_seeds) + len(http_seeds)
+    total = len(ws_seeds) + len(http_seeds) + len(ws_frags_seeds) + len(prefs_seeds) + len(json_recv_seeds)
     print(f"[+] Total corpus: {total} files")

@@ -316,6 +316,18 @@ echo "[*] Building fuzz_http_parsing..."
 $CC $COMMON_CFLAGS fuzz_http_parsing.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS -o fuzz_http_parsing$SUFFIX
 echo "[+] Built: fuzz_http_parsing$SUFFIX"
 
+echo "[*] Building fuzz_ws_fragments..."
+$CC $COMMON_CFLAGS fuzz_ws_fragments.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS -o fuzz_ws_fragments$SUFFIX
+echo "[+] Built: fuzz_ws_fragments$SUFFIX"
+
+echo "[*] Building fuzz_prefs_message..."
+$CC $COMMON_CFLAGS fuzz_prefs_message.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS -o fuzz_prefs_message$SUFFIX
+echo "[+] Built: fuzz_prefs_message$SUFFIX"
+
+echo "[*] Building fuzz_json_recv..."
+$CC $COMMON_CFLAGS fuzz_json_recv.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS -o fuzz_json_recv$SUFFIX
+echo "[+] Built: fuzz_json_recv$SUFFIX"
+
 # CmpLog variants (AFL++ only)
 if [ "$MODE" = "afl" ]; then
     echo
@@ -326,6 +338,15 @@ if [ "$MODE" = "afl" ]; then
     AFL_LLVM_CMPLOG=1 $CC $COMMON_CFLAGS fuzz_http_parsing.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS \
         -o fuzz_http_parsing_cmplog
     echo "[+] Built: fuzz_http_parsing_cmplog"
+    AFL_LLVM_CMPLOG=1 $CC $COMMON_CFLAGS fuzz_ws_fragments.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS \
+        -o fuzz_ws_fragments_cmplog
+    echo "[+] Built: fuzz_ws_fragments_cmplog"
+    AFL_LLVM_CMPLOG=1 $CC $COMMON_CFLAGS fuzz_prefs_message.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS \
+        -o fuzz_prefs_message_cmplog
+    echo "[+] Built: fuzz_prefs_message_cmplog"
+    AFL_LLVM_CMPLOG=1 $CC $COMMON_CFLAGS fuzz_json_recv.c $MOCK_OBJS $JSON_C_LIBS $EXTRA_LIBS \
+        -o fuzz_json_recv_cmplog
+    echo "[+] Built: fuzz_json_recv_cmplog"
 
     echo
     echo "[*] Building HTTP custom mutator..."
