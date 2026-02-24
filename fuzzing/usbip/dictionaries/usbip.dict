@@ -1,0 +1,64 @@
+# USB/IP AFL++ dictionary
+# Protocol tokens as binary keywords for smarter mutations.
+#
+# Usage: afl-fuzz -x dictionaries/usbip.dict ...
+
+# Protocol version
+version_0x0111="\x01\x11"
+
+# Operation codes (big-endian, 2 bytes)
+op_req_devlist="\x80\x05"
+op_rep_devlist="\x00\x05"
+op_req_import="\x80\x03"
+op_rep_import="\x00\x03"
+
+# op_common header prefix: version + OP_REQ_DEVLIST
+op_hdr_devlist="\x01\x11\x80\x05"
+op_hdr_import="\x01\x11\x80\x03"
+
+# Status codes (4 bytes, big-endian)
+status_ok="\x00\x00\x00\x00"
+status_error="\x00\x00\x00\x01"
+
+# URB command types (4 bytes, big-endian)
+cmd_submit="\x00\x00\x00\x01"
+cmd_unlink="\x00\x00\x00\x02"
+ret_submit="\x00\x00\x00\x03"
+ret_unlink="\x00\x00\x00\x04"
+
+# Common busid strings
+busid_1_1="1-1"
+busid_2_1="2-1"
+busid_1_2="1-2"
+
+# Interesting 32-bit values (length / count fields)
+u32_zero="\x00\x00\x00\x00"
+u32_one="\x00\x00\x00\x01"
+u32_max="\xff\xff\xff\xff"
+u32_intmin="\x80\x00\x00\x00"
+u32_intmax="\x7f\xff\xff\xff"
+u32_65536="\x00\x01\x00\x00"
+u32_256="\x00\x00\x01\x00"
+
+# USB speed values (used in usbip_usb_device.speed)
+speed_low="\x00\x00\x00\x01"
+speed_full="\x00\x00\x00\x02"
+speed_high="\x00\x00\x00\x03"
+speed_super="\x00\x00\x00\x05"
+
+# Transfer flags (URB submit)
+urb_short_not_ok="\x00\x00\x00\x01"
+urb_iso_asap="\x00\x00\x00\x02"
+urb_no_transfer_dma="\x00\x00\x00\x04"
+urb_zero_packet="\x00\x00\x00\x40"
+
+# USB setup packet templates (8 bytes)
+setup_get_descriptor="\x80\x06\x00\x01\x00\x00\xff\x00"
+setup_set_address="\x00\x05\x01\x00\x00\x00\x00\x00"
+setup_set_config="\x00\x09\x01\x00\x00\x00\x00\x00"
+setup_clear_feature="\x02\x01\x00\x00\x00\x00\x00\x00"
+setup_all_ff="\xff\xff\xff\xff\xff\xff\xff\xff"
+
+# Sysfs path prefix (used in usbip_usb_device.path)
+sysfs_path="/sys/devices/pci0000:00/"
+sysfs_usb_prefix="/sys/bus/usb/devices/"

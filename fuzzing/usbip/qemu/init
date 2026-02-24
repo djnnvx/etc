@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# /init — minimal initramfs init for the usbipd fuzzing VM.
+#
+# Goals:
+#   1. Mount virtual filesystems
+#   2. Configure loopback + eth0 networking (QEMU user networking)
+#   3. Load USB/IP kernel modules
+#   4. Run usbipd in a tight watchdog loop (restart immediately on crash)
+#
+# Boot time target: <2 seconds from kernel entry to usbipd accepting connections.
+# This script MUST NOT call any program that isn't in the initramfs.
+
+set -e
+
+# ── virtual filesystems ────────────────────────────────────────────────────
+mount -t proc     proc    /proc
+mount -t sysfs    sysfs   /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts   devpts  /dev/pts
+mount -t tmpfs    tmpfs   /tmp
+
+# suppress most kernel messages on the console
+echo 1 > /proc/sys/kernel/printk
+
+# ── networking ─────────────────────────────────────────────────────────────
+# QEMU user-mode networking gives us 10.0.2.15/24, gateway 10.0.2.2
+ip link set lo   up
+ip link set eth0 up
+ip addr add 10.0.2.15/24 dev eth0
+ip route add default via 10.0.2.2 dev eth0
+
+# ── USB/IP kernel modules ──────────────────────────────────────────────────
+modprobe usbip-core 2>/dev/null  || true
+modprobe usbip-host 2>/dev/null  || true
+modprobe vhci-hcd  2>/dev/null   || true
+
+# ── usbipd watchdog loop ───────────────────────────────────────────────────
+# usbipd runs in foreground mode (no -D flag).  When it crashes or exits the
+# loop restarts it immediately — this keeps the fuzzer's "connect and send"
+# flow always finding a live daemon.
+#
+# Crash recovery time = time for this loop to spin + usbipd startup time.
+# On a minimal initramfs that's ~1-5 ms, keeping throughput high.
+
+echo "usbip-fuzz: starting usbipd watchdog"
+
+while true; do
+    /usr/sbin/usbipd 2>/dev/null
+    # usbipd exited (crash / clean exit) — restart without any delay
+done
+
+# unreachable — kernel will panic if this exits
