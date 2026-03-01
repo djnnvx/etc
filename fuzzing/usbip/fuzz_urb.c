@@ -1,38 +1,26 @@
 /*
- * fuzz_urb.c — USB/IP URB header parsing harness (CVE-2016-3955 class).
+ * fuzz_urb.c — USB/IP URB PDU header parsing harness (CVE-2016-3955 class).
  *
- * Exercises usbip_header parsing: the 48-byte compound header composed of
- * usbip_header_basic (20 bytes) + usbip_header_cmd_submit (28 bytes).
+ * struct usbip_header is a kernel-internal type (not in userspace UAPI), so
+ * its wire layout is defined in usbip_fuzz.h. We receive it via usbip_net_recv()
+ * and byte-swap fields manually to exercise the validation paths that the
+ * kernel's vhci_rx.c / stub_rx.c would perform.
  *
- * Target: usbip_net_pack_pdu() and the length validation performed when
- * processing USBIP_CMD_SUBMIT / USBIP_RET_SUBMIT messages.
+ * CVE-2016-3955: USBIP_RET_SUBMIT with actual_length > transfer_buffer_length
+ * causes a heap overflow in usbip_recv_xbuff() (kernel module).
  *
- * CVE-2016-3955 pattern: USBIP_RET_SUBMIT with actual_length > urb->transfer_buffer_length
- * causes a heap overflow in usbip_recv_xbuff() (kernel module side).
- * The userspace stub_rx.c also processes these fields.
- *
- * Interesting bug classes:
- *   - transfer_buffer_length negative / INT_MIN
- *   - number_of_packets overflow
- *   - actual_length > transfer_buffer_length (CVE-2016-3955 repro class)
- *   - start_frame out of range for ISO transfers
- *   - ep > 15 (invalid endpoint)
+ * Bug classes: transfer_buffer_length negative / INT_MIN, number_of_packets
+ * overflow, actual_length > transfer_buffer_length, ep > 15, bad command type.
  *
  * Input format:
- *   [command:4 BE][seqnum:4 BE][devid:4 BE][direction:4 BE][ep:4 BE]
- *   [transfer_flags:4 BE][transfer_buffer_length:4 BE][start_frame:4 BE]
- *   [number_of_packets:4 BE][interval:4 BE][setup[8]]
+ *   [command:4 BE][seqnum:4 BE][devid:4 BE][direction:4 BE][ep:4 BE]  = 20 bytes
+ *   [transfer_flags:4][transfer_buffer_length:4][start_frame:4]        = 12 bytes
+ *   [number_of_packets:4][interval:4][setup:8]                         = 16 bytes
  *   [... optional data payload ...]
- *
- * Compile (via build_fuzzers.sh):
- *   afl-clang-fast -fsanitize=address,undefined -g -O1 \
- *     -I fuzz-include -I usbip-src/src -I usbip-src/libsrc \
- *     fuzz_urb.c usbip_network.o usbip_common.o mock_syscalls.o \
- *     -Wl,--wrap=recv -Wl,--wrap=send -Wl,--wrap=write \
- *     -o fuzz_urb
  */
 
 #include "fuzz-include/usbip_fuzz.h"
+#include "usbip-src/libsrc/usbip_common.h"
 #include "usbip-src/src/usbip_network.h"
 
 #include <stdint.h>
@@ -40,18 +28,12 @@
 #include <string.h>
 #include <arpa/inet.h>
 
-#define FAKE_FD    42
-#define HDR_SIZE   48   /* sizeof(usbip_header) */
-
-/*
- * Cap transfer_buffer_length to 64 KB to avoid spending time on legal
- * multi-MB allocations while still testing overflow conditions.
- */
-#define MAX_XFER_LEN (1 << 16)
+#define FAKE_FD      42
+#define MAX_XFER_LEN (1 << 16)  /* 64 KB cap to avoid slow-but-legal allocs */
 
 static int fuzz_one(const uint8_t *data, size_t size)
 {
-    if (size < HDR_SIZE)
+    if (size < USBIP_PDU_HDR_SIZE)
         return 0;
 
     uint8_t buf[FUZZ_BUF_MAX];
@@ -59,8 +41,9 @@ static int fuzz_one(const uint8_t *data, size_t size)
     memcpy(buf, data, n);
 
     /*
-     * Read transfer_buffer_length from offset 24 (after the 20-byte basic hdr
-     * + 4-byte transfer_flags) and clamp it so we don't OOM.
+     * Clamp transfer_buffer_length (bytes 24-27 in the PDU) so we don't
+     * spend time on legal multi-MB allocations. Still allows testing
+     * negative values and overflow conditions.
      */
     int32_t tbl_be;
     memcpy(&tbl_be, buf + 24, 4);
@@ -73,22 +56,27 @@ static int fuzz_one(const uint8_t *data, size_t size)
 
     fuzz_reset(buf, n);
 
-    /*
-     * usbip_net_recv_pdu_header parses the full compound header.
-     * This exercises all the byte-swap + validation logic.
-     */
     struct usbip_header hdr;
     memset(&hdr, 0, sizeof(hdr));
-    usbip_net_recv_pdu_header(FAKE_FD, &hdr);
+    if (usbip_net_recv(FAKE_FD, &hdr, sizeof(hdr)) < 0)
+        return 0;
 
-    /*
-     * For submit commands, also exercise the data-payload receive path.
-     * usbip_net_recv_xbuff reads transfer_buffer_length bytes — this is
-     * where CVE-2016-3955 manifested (actual_length > transfer_buffer_length).
-     */
-    uint32_t cmd = ntohl(hdr.base.command);
+    /* Byte-swap base header fields from network order */
+    hdr.base.command   = ntohl(hdr.base.command);
+    hdr.base.seqnum    = ntohl(hdr.base.seqnum);
+    hdr.base.devid     = ntohl(hdr.base.devid);
+    hdr.base.direction = ntohl(hdr.base.direction);
+    hdr.base.ep        = ntohl(hdr.base.ep);
+
+    uint32_t cmd = hdr.base.command;
+
     if (cmd == USBIP_CMD_SUBMIT || cmd == USBIP_RET_SUBMIT) {
-        int32_t xfer_len = ntohl((uint32_t)hdr.u.cmd_submit.transfer_buffer_length);
+        /*
+         * For submit/return, read the payload indicated by transfer_buffer_length.
+         * This exercises the CVE-2016-3955 overflow class.
+         */
+        int32_t xfer_len = (int32_t)ntohl(
+            (uint32_t)hdr.u.cmd_submit.transfer_buffer_length);
         if (xfer_len > 0 && xfer_len <= MAX_XFER_LEN) {
             void *payload = malloc((size_t)xfer_len);
             if (payload) {
@@ -96,6 +84,9 @@ static int fuzz_one(const uint8_t *data, size_t size)
                 free(payload);
             }
         }
+    } else if (cmd == USBIP_CMD_UNLINK || cmd == USBIP_RET_UNLINK) {
+        /* Unlink just has a seqnum — already in hdr.u.cmd_unlink.seqnum */
+        hdr.u.cmd_unlink.seqnum = ntohl(hdr.u.cmd_unlink.seqnum);
     }
 
     return 0;

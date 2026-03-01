@@ -25,6 +25,14 @@ size_t   g_fuzz_offset;
 unsigned long usbip_debug_flag = 0;
 
 /*
+ * udev_context — global udev handle owned by usbip_host_common.c which we
+ * don't compile for the fuzz build. Provide a NULL stub; the network
+ * parsing paths we target never call udev_device_new_from_subsystem_sysname.
+ */
+struct udev;
+struct udev *udev_context = NULL;
+
+/*
  * __wrap_recv — intercepts every recv() call from the usbip objects.
  * Serves data from g_fuzz_buf in order; returns 0 (EOF) when exhausted.
  *
@@ -62,11 +70,19 @@ ssize_t __wrap_send(int fd, const void *buf, size_t len, int flags)
 /* Some usbip code paths use write() for logging; silence those too */
 ssize_t __wrap_write(int fd, const void *buf, size_t len)
 {
-    /* Allow writes to stderr (fd 2) for ASAN/abort messages */
-    if (fd == 2) {
-        extern ssize_t __real_write(int, const void *, size_t);
+    extern ssize_t __real_write(int, const void *, size_t);
+    /*
+     * Pass through:
+     *   fd 2   — stderr (ASAN/abort messages need to reach the terminal)
+     *   fd 198 — AFL++ forkserver control pipe  (FORKSRV_FD)
+     *   fd 199 — AFL++ forkserver status pipe   (FORKSRV_FD+1)
+     *
+     * AFL++ runtime calls write(199, hello, 4) to hand-shake with afl-fuzz.
+     * Without this pass-through the hello is silently discarded and AFL++
+     * deadlocks waiting for the forkserver to become ready.
+     */
+    if (fd == 2 || fd == 198 || fd == 199)
         return __real_write(fd, buf, len);
-    }
     (void)buf;
     return (ssize_t)len;
 }

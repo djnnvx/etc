@@ -5,7 +5,10 @@
  * Provides:
  *   - global fuzz buffer (populated by harness main, consumed by __wrap_recv)
  *   - logging macro stubs so usbip source compiles without a real logging lib
- *   - protocol constants / struct aliases for use in harnesses
+ *   - usbip_header wire-format structs for fuzz_urb (not in userspace headers)
+ *
+ * Protocol constants (USBIP_VERSION, OP_*, SYSFS_BUS_ID_SIZE, etc.) are NOT
+ * defined here — they come from usbip_common.h / usbip_network.h / config.h.
  */
 
 #include <stddef.h>
@@ -57,30 +60,59 @@ static inline void fuzz_reset(const uint8_t *data, size_t size) {
 
 /*
  * usbip_debug_flag — extern referenced by logging macros in usbip_common.h.
- * Set to 0 so all debug paths are no-ops.
  */
 extern unsigned long usbip_debug_flag;
 
-/* ── USB/IP protocol constants ────────────────────────────────────── */
-#define USBIP_VERSION       0x0111
-
-#define OP_REQUEST          (0x80 << 8)
-#define OP_REPLY            (0x00 << 8)
-
-#define OP_DEVLIST          0x0005
-#define OP_IMPORT           0x0003
-
-#define OP_REQ_DEVLIST      (OP_REQUEST | OP_DEVLIST)   /* 0x8005 */
-#define OP_REP_DEVLIST      (OP_REPLY   | OP_DEVLIST)   /* 0x0005 */
-#define OP_REQ_IMPORT       (OP_REQUEST | OP_IMPORT)    /* 0x8003 */
-#define OP_REP_IMPORT       (OP_REPLY   | OP_IMPORT)    /* 0x0003 */
-
+/*
+ * ── USB/IP URB PDU wire-format constants and structs ──────────────────
+ * struct usbip_header lives only in the kernel's internal headers, not in
+ * any userspace UAPI. Define the wire layout here for fuzz_urb.c so it
+ * can call usbip_net_recv() and inspect the PDU fields.
+ *
+ * Matches drivers/usb/usbip/usbip_common.h — do not change field order.
+ */
 #define USBIP_CMD_SUBMIT    0x00000001
 #define USBIP_CMD_UNLINK    0x00000002
 #define USBIP_RET_SUBMIT    0x00000003
 #define USBIP_RET_UNLINK    0x00000004
 
-#define SYSFS_BUS_ID_SIZE   32
+/* PDU header is 48 bytes on the wire (20-byte basic + 28-byte union) */
+#define USBIP_PDU_HDR_SIZE  48
 
-/* op_common is 8 bytes on the wire */
-#define OP_COMMON_SIZE      8
+struct usbip_header_basic {
+    uint32_t command;
+    uint32_t seqnum;
+    uint32_t devid;
+    uint32_t direction;
+    uint32_t ep;
+};
+
+struct usbip_header_cmd_submit {
+    uint32_t transfer_flags;
+    int32_t  transfer_buffer_length;
+    int32_t  start_frame;
+    int32_t  number_of_packets;
+    int32_t  interval;
+    uint8_t  setup[8];
+};
+
+struct usbip_header_ret_submit {
+    int32_t  status;
+    int32_t  actual_length;
+    int32_t  start_frame;
+    int32_t  number_of_packets;
+    int32_t  error_count;
+};
+
+struct usbip_header_cmd_unlink { uint32_t seqnum; };
+struct usbip_header_ret_unlink { int32_t  status; };
+
+struct usbip_header {
+    struct usbip_header_basic base;
+    union {
+        struct usbip_header_cmd_submit  cmd_submit;
+        struct usbip_header_ret_submit  ret_submit;
+        struct usbip_header_cmd_unlink  cmd_unlink;
+        struct usbip_header_ret_unlink  ret_unlink;
+    } u;
+};

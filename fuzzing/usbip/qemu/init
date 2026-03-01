@@ -21,8 +21,16 @@ mkdir -p /dev/pts
 mount -t devpts   devpts  /dev/pts
 mount -t tmpfs    tmpfs   /tmp
 
+# debugfs: required for KCOV (/sys/kernel/debug/kcov)
+mount -t debugfs  debugfs /sys/kernel/debug 2>/dev/null || true
+
 # suppress most kernel messages on the console
 echo 1 > /proc/sys/kernel/printk
+
+# KASAN: make KASAN reports immediately panic (and reboot) rather than
+# continuing with corrupted state. AFL++ detects the reboot as ECONNRESET.
+echo 1 > /proc/sys/kernel/panic_on_oops
+echo 1 > /proc/sys/kernel/panic
 
 # ── networking ─────────────────────────────────────────────────────────────
 # QEMU user-mode networking gives us 10.0.2.15/24, gateway 10.0.2.2

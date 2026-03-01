@@ -61,11 +61,14 @@ pkill -u "$(id -un)" qemu-system-x86_64 2>/dev/null || true
 
 # ── kill any background AFL++ processes ───────────────────────────────────────
 pkill -u "$(id -un)" -f "afl-fuzz.*usbip" 2>/dev/null || true
-pkill -u "$(id -un)" -f "fuzz_protocol"   2>/dev/null || true
+pkill -u "$(id -un)" -f "fuzz_protocol"    2>/dev/null || true
 pkill -u "$(id -un)" -f "fuzz_devlist"    2>/dev/null || true
 pkill -u "$(id -un)" -f "fuzz_import"     2>/dev/null || true
 pkill -u "$(id -un)" -f "fuzz_urb"        2>/dev/null || true
-pkill -u "$(id -un)" -f "net_send"        2>/dev/null || true
+pkill -u "$(id -un)" -f "fuzz_vhci_server"  2>/dev/null || true
+pkill -u "$(id -un)" -f "fuzz_stub_client" 2>/dev/null || true
+pkill -u "$(id -un)" -f "net_send"         2>/dev/null || true
+pkill -u "$(id -un)" -f "kcov_shim"       2>/dev/null || true
 
 if [[ "${CRASHES_ONLY}" -eq 1 ]]; then
     ok "Process cleanup done. (--crashes-only: no files removed)"
@@ -79,7 +82,8 @@ if [[ "${KEEP_BUILDS}" -eq 0 ]]; then
     rm -f fuzz_devlist  fuzz_devlist.cmplog
     rm -f fuzz_import   fuzz_import.cmplog
     rm -f fuzz_urb      fuzz_urb.cmplog
-    rm -f usbip_network.o usbip_common.o mock_syscalls.o
+    rm -f fuzz_vhci_server fuzz_stub_client kcov_shim
+    rm -f usbip_network.o usbip_common.o mock_syscalls.o names.o
     rm -f net_send usbipd-plain
 
     log "Removing kernel build artifacts..."

@@ -27,8 +27,10 @@ BUSYBOX_VER="${BUSYBOX_VER:-1.36.1}"
 AFL_REPO="https://github.com/AFLplusplus/AFLplusplus.git"
 
 SKIP_KERNEL=0
+SKIP_DEPS=0
 for arg in "$@"; do
     [[ "$arg" == "--no-kernel" ]] && SKIP_KERNEL=1
+    [[ "$arg" == "--skip-deps" ]] && SKIP_DEPS=1
 done
 
 log()  { echo "[*] $*"; }
@@ -36,19 +38,23 @@ ok()   { echo "[+] $*"; }
 warn() { echo "[!] $*"; }
 
 # ── 1. System dependencies ───────────────────────────────────────────────────
-log "Installing system dependencies..."
-sudo apt-get update -qq
-sudo apt-get install -y \
-    build-essential git curl wget python3 python3-pip tmux \
-    libelf-dev libssl-dev flex bison bc cpio \
-    libncurses-dev libncurses5-dev \
-    libusb-1.0-0-dev libudev-dev libglib2.0-dev \
-    pkg-config autoconf automake libtool \
-    qemu-system-x86 \
-    gcc-multilib \
-    llvm clang lld \
-    gdb
-ok "Dependencies installed."
+if [[ "${SKIP_DEPS}" -eq 1 ]]; then
+    ok "Skipping dependency install (--skip-deps)."
+else
+    log "Installing system dependencies..."
+    sudo apt-get update -qq
+    sudo apt-get install -y \
+        build-essential git curl wget python3 python3-pip tmux \
+        libelf-dev libssl-dev flex meson bison bc cpio \
+        libncurses-dev libncurses5-dev \
+        libusb-1.0-0-dev libudev-dev libglib2.0-dev \
+        pkg-config autoconf automake libtool \
+        qemu-system-x86 \
+        gcc-multilib \
+        llvm clang lld \
+        gdb
+    ok "Dependencies installed."
+fi
 
 # ── 2. AFL++ ─────────────────────────────────────────────────────────────────
 if [[ ! -x "afl-build/usr/local/bin/afl-fuzz" ]]; then
@@ -59,7 +65,7 @@ if [[ ! -x "afl-build/usr/local/bin/afl-fuzz" ]]; then
     cd AFLplusplus
 
     # QEMU mode requires python3-dev
-    sudo apt-get install -y python3-dev python3-setuptools
+    [[ "${SKIP_DEPS}" -eq 0 ]] && sudo apt-get install -y python3-dev python3-setuptools || true
 
     # make distrib builds: core + LLVM instrumentation + QEMU mode
     make distrib -j"$(nproc)"
@@ -96,6 +102,15 @@ else
     log "Configuring kernel (allnoconfig + USB/IP fragment)..."
     cd "${KERNEL_DIR}"
 
+    # GCC 15+ defaults to C23, where 'bool'/'false' are keywords — the kernel's
+    # arch/x86/boot/compressed/Makefile overrides KBUILD_CFLAGS entirely and
+    # doesn't inherit the top-level -std=gnu11, so patch it directly.
+    if gcc --version 2>&1 | grep -qE "gcc \(.*\) (1[5-9]|[2-9][0-9])\."; then
+        sed -i 's/^KBUILD_CFLAGS := /KBUILD_CFLAGS := -std=gnu11 /' \
+            arch/x86/boot/compressed/Makefile
+        warn "GCC 15+ detected: patched compressed/Makefile with -std=gnu11"
+    fi
+
     make allnoconfig
 
     # Merge our minimal USB/IP config on top of allnoconfig
@@ -105,7 +120,8 @@ else
     make olddefconfig
 
     log "Building kernel (this takes ~15-20 min on first run)..."
-    make -j"$(nproc)" bzImage 2>&1 | tail -5
+    make -j"$(nproc)" bzImage 2>&1 | tee /tmp/kbuild.log | grep -E "^\s*(CC|LD|AR|OBJCOPY|HOSTCC|error:|warning: )" || \
+        { grep "error:" /tmp/kbuild.log | tail -20; exit 1; }
 
     cp arch/x86/boot/bzImage "${SCRIPT_DIR}/bzImage"
     cd "${SCRIPT_DIR}"
@@ -134,6 +150,9 @@ else
     sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
     sed -i 's/CONFIG_STATIC=n/CONFIG_STATIC=y/' .config
     echo "CONFIG_STATIC=y" >> .config
+    # Disable tc applet: uses CBQ structs removed from modern kernel UAPI headers
+    sed -i 's/CONFIG_TC=y/CONFIG_TC=n/' .config
+    echo "CONFIG_TC=n" >> .config
     make oldconfig < /dev/null || true
     make -j"$(nproc)"
     make install CONFIG_PREFIX="${SCRIPT_DIR}/busybox-install"
@@ -158,7 +177,6 @@ if [[ -n "${KERNEL_USBIP}" ]]; then
         cd "${KERNEL_USBIP}"
         ./autogen.sh
         ./configure --prefix="${SCRIPT_DIR}/usbipd-plain-install" \
-                    LDFLAGS="-static" \
                     CFLAGS="-O2 -g"
         make -j"$(nproc)"
         make install
@@ -234,14 +252,18 @@ exit 1' > initramfs/usr/sbin/usbipd
 fi
 
 # ── 7. net_send.c ─────────────────────────────────────────────────────────────
+# Compile with afl-clang-fast so AFL++ can spawn it via the forkserver.
+# The coverage of net_send.c itself is trivial (it's just a TCP relay), but
+# building with afl-clang-fast avoids the "fork server handshake failed" error
+# that occurs when AFL++ tries to start an uninstrumented binary as a worker.
 if [[ ! -f "net_send" ]]; then
-    log "Compiling net_send.c..."
-    gcc -O2 -Wall -o net_send net_send.c
+    log "Compiling net_send.c (afl-clang-fast)..."
+    afl-clang-fast -O2 -Wall -o net_send net_send.c
     ok "net_send compiled."
 fi
 
-# ── 8. Generate corpus ────────────────────────────────────────────────────────
-if [[ ! -d "corpus" ]]; then
+# ── 8. Generate corpus (and per-harness subdirs) ─────────────────────────────
+if [[ ! -d "corpus" ]] || [[ ! -d "corpus/protocol" ]]; then
     log "Generating seed corpus..."
     python3 gen_corpus.py
 fi

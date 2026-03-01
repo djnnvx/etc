@@ -62,3 +62,31 @@ setup_all_ff="\xff\xff\xff\xff\xff\xff\xff\xff"
 # Sysfs path prefix (used in usbip_usb_device.path)
 sysfs_path="/sys/devices/pci0000:00/"
 sysfs_usb_prefix="/sys/bus/usb/devices/"
+
+# USB setup packet bRequest values (single byte — control transfer discriminators)
+usb_req_get_status="\x00"
+usb_req_clear_feature="\x01"
+usb_req_set_feature="\x03"
+usb_req_set_address="\x05"
+usb_req_get_descriptor="\x06"
+usb_req_set_descriptor="\x07"
+usb_req_get_config="\x08"
+usb_req_set_config="\x09"
+usb_req_get_interface="\x0a"
+usb_req_set_interface="\x0b"
+
+# USB descriptor types (wValue high byte in GET_DESCRIPTOR)
+usb_dt_device="\x01"
+usb_dt_config="\x02"
+usb_dt_string="\x03"
+usb_dt_interface="\x04"
+usb_dt_endpoint="\x05"
+usb_dt_qualifier="\x06"
+
+# ISO overflow trigger values: number_of_packets that cause n*16 to wrap (4-byte BE)
+# 0x08000001: n*16 = 0x80000010 → overflows int32 → negative size → kmalloc underalloc
+# 0x10000001: n*16 = 0x100000010 → truncated uint32 = 0x10 → 16-byte alloc, n*16 bytes used
+# 0x40000000: n*16 = 0x400000000 → wraps u32 to 0 → kmalloc(0)
+iso_np_overflow_08="\x08\x00\x00\x01"
+iso_np_overflow_10="\x10\x00\x00\x01"
+iso_np_overflow_40="\x40\x00\x00\x00"

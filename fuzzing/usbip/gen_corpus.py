@@ -202,9 +202,18 @@ seed("urb_ret_len_max",         urb_header(RET_SUBMIT, transfer_buffer_length=65
 seed("urb_ret_len_overflow",    urb_header(RET_SUBMIT, transfer_buffer_length=0x7FFFFFFF))
 
 # number_of_packets edge cases (ISO transfers)
-seed("urb_iso_packets_0",       urb_header(CMD_SUBMIT, number_of_packets=0))
-seed("urb_iso_packets_max",     urb_header(CMD_SUBMIT, number_of_packets=0x7FFFFFFF))
-seed("urb_iso_packets_neg",     urb_header(CMD_SUBMIT, number_of_packets=-1))
+# stub_rx.c: kmalloc(number_of_packets * sizeof(struct usbip_iso_packet_descriptor))
+# iso_descriptor is 16 bytes; overflow threshold: n > 0x0fffffff
+seed("urb_iso_packets_0",           urb_header(CMD_SUBMIT, number_of_packets=0))
+seed("urb_iso_packets_max",         urb_header(CMD_SUBMIT, number_of_packets=0x7FFFFFFF))
+seed("urb_iso_packets_neg",         urb_header(CMD_SUBMIT, number_of_packets=-1))
+seed("urb_iso_wrap_u32",            urb_header(CMD_SUBMIT, number_of_packets=0x10000000))   # n*16 == 0
+seed("urb_iso_wrap_u32p1",          urb_header(CMD_SUBMIT, number_of_packets=0x10000001))   # n*16 == 16
+seed("urb_iso_wrap_s32",            urb_header(CMD_SUBMIT, number_of_packets=0x08000000))   # n*16 wraps s32
+
+# transfer_buffer_length near overflow boundaries
+seed("urb_tbl_uint_max",            urb_header(CMD_SUBMIT, transfer_buffer_length=0x7FFFFFFF))
+seed("urb_tbl_wrap_s32",            urb_header(CMD_SUBMIT, transfer_buffer_length=-2147483648))
 
 # Invalid endpoint / direction
 seed("urb_ep_15",               urb_header(CMD_SUBMIT, ep=15))
@@ -238,7 +247,135 @@ seed("urb_truncated",           b"\x00" * 20)  # just basic header, no cmd_submi
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 7. Raw boundary seeds
+# 7. vhci-hcd server-side seeds (for fuzz_vhci_server — two-sided fuzzer)
+#
+# Each seed is the 28-byte ret_submit union that fuzz_vhci_server overlays onto
+# USBIP_RET_SUBMIT responses.  Fields: status(4) actual_length(4) start_frame(4)
+# number_of_packets(4) error_count(4) + 8 bytes padding.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def ret_submit_fields(status=0, actual_length=0, start_frame=0,
+                      number_of_packets=0, error_count=0) -> bytes:
+    return struct.pack(">iiiii", status, actual_length, start_frame,
+                       number_of_packets, error_count) + b"\x00" * 8
+
+INT_MIN = -0x80000000
+INT_MAX =  0x7fffffff
+
+# Normal / status variants
+seed("vhci_ret_ok",                    ret_submit_fields(status=0, actual_length=64))
+seed("vhci_ret_status_error",          ret_submit_fields(status=-22))   # -EINVAL
+seed("vhci_ret_status_epipe",          ret_submit_fields(status=-32))   # -EPIPE
+seed("vhci_ret_status_enodev",         ret_submit_fields(status=-19))   # -ENODEV
+
+# CVE-2016-3955 class: actual_length > transfer_buffer_length
+# fuzz_vhci_server will send this as the server's response to any CMD_SUBMIT
+seed("vhci_actual_len_overflow",       ret_submit_fields(actual_length=INT_MAX))
+seed("vhci_actual_len_intmin",         ret_submit_fields(actual_length=INT_MIN))
+seed("vhci_actual_len_neg1",           ret_submit_fields(actual_length=-1))
+seed("vhci_actual_len_64k",           ret_submit_fields(actual_length=65536))
+seed("vhci_actual_len_64k_plus1",     ret_submit_fields(actual_length=65537))
+seed("vhci_actual_len_zero",          ret_submit_fields(actual_length=0))
+
+# ISO path: number_of_packets > 0 triggers usbip_recv_iso code path
+seed("vhci_iso_one_pkt",              ret_submit_fields(actual_length=16, number_of_packets=1))
+seed("vhci_iso_many_pkts",            ret_submit_fields(actual_length=0,  number_of_packets=255))
+seed("vhci_iso_max_pkts",             ret_submit_fields(number_of_packets=INT_MAX))
+seed("vhci_iso_neg_pkts",             ret_submit_fields(number_of_packets=-1))
+seed("vhci_iso_overflow",             ret_submit_fields(actual_length=INT_MAX, number_of_packets=INT_MAX))
+
+# error_count / start_frame edge cases
+seed("vhci_start_frame_intmin",       ret_submit_fields(start_frame=INT_MIN))
+seed("vhci_error_count_max",          ret_submit_fields(error_count=INT_MAX))
+seed("vhci_all_ff",                   b"\xff" * 28)
+seed("vhci_all_zeros",                b"\x00" * 28)
+
+# Integer overflow in kmalloc size calculation:
+#   usbip_recv_iso: kmalloc(number_of_packets * sizeof(struct usbip_iso_packet_descriptor))
+#   sizeof(usbip_iso_packet_descriptor) == 16 bytes on kernel side
+#   Overflow threshold: n * 16 wraps u32 when n > 0x0fffffff (268435455)
+#   These values cause the allocated buffer to be smaller than the data being received.
+ISO_DESC_SIZE = 16
+WRAP_U32 = (1 << 32) // ISO_DESC_SIZE       # 0x10000000 — exactly wraps to 0
+WRAP_U32_PLUS1 = WRAP_U32 + 1               # 0x10000001 — wraps to 16 bytes allocated
+WRAP_S32 = (1 << 31) // ISO_DESC_SIZE       # 0x08000000 — wraps signed to negative
+# WRAP_U32=0x10000000: n*16 == 0x100000000 which wraps to 0 in u32 → kmalloc(0)
+# WRAP_U32_PLUS1:      n*16 == 0x100000010 which wraps to 16 → 16-byte alloc but n*16 bytes used
+seed("vhci_iso_wrap_u32",     ret_submit_fields(number_of_packets=WRAP_U32,      actual_length=64))
+seed("vhci_iso_wrap_u32p1",   ret_submit_fields(number_of_packets=WRAP_U32_PLUS1, actual_length=64))
+seed("vhci_iso_wrap_s32",     ret_submit_fields(number_of_packets=WRAP_S32,      actual_length=64))
+
+# Compound: both actual_length overflow AND iso multiplication overflow
+seed("vhci_double_overflow",  ret_submit_fields(actual_length=INT_MAX, number_of_packets=WRAP_U32_PLUS1))
+
+# actual_length near UINT_MAX (unsigned interpretation — some code paths treat it unsigned)
+seed("vhci_actual_uint_max",  struct.pack(">iIiii", 0, 0xFFFFFFFF, 0, 0, 0) + b"\x00" * 8)
+
+# Borderline: actual_length == transfer_buffer_length (exactly equal — off-by-one test)
+# fuzz_vhci_server always sends the response regardless of the original request's tbl,
+# but these seed values help AFL++ discover the boundary condition faster.
+for tbl in [0, 1, 63, 64, 127, 128, 255, 256, 4095, 4096]:
+    seed(f"vhci_actual_eq_tbl_{tbl}", ret_submit_fields(actual_length=tbl))
+
+# ── ISO overflow: targeted values matching the three unpatched kernel bugs ──────
+#
+# usbip_recv_iso() bug: int size = np * sizeof(*iso)  where sizeof(*iso)==16
+#   np=0x08000001 → 0x08000001*16 = 0x80000010 → overflows int32 → -2147483632
+#   np=0x10000001 → 0x10000001*16 = 0x100000010 → truncated uint32 = 0x10 = 16
+#   np=0x7FFFFFFF/16+1 = 0x08000000 → edge case at INT_MAX/16
+#
+# With fuzz_vhci_server's ISO descriptor mirroring, the server sends exactly
+# the overflowed number of bytes and the kernel's loop reads OOB → KASAN hit.
+#
+# Seeds named with explicit overflow semantics for clarity in AFL++ crash reports.
+seed("vhci_iso_np_overflow_08",
+     ret_submit_fields(actual_length=64, number_of_packets=0x08000001))
+seed("vhci_iso_np_overflow_10",
+     ret_submit_fields(actual_length=64, number_of_packets=0x10000001))
+seed("vhci_iso_np_overflow_7f",
+     ret_submit_fields(actual_length=64, number_of_packets=0x7FFFFFFF // 16 + 1))
+
+# usbip_pad_iso() bug: actualoffset underflow → memmove with negative offset
+# Trigger: ISO packet with actual_length > accumulated offset in the packet array.
+# We send actual_length=0 per ISO packet but a large total actual_length header,
+# forcing pad_iso to compute a negative offset for memmove().
+# Represent as: number_of_packets=8 (valid), actual_length=INT_MAX (large total)
+seed("vhci_iso_pad_underflow",
+     ret_submit_fields(actual_length=INT_MAX, number_of_packets=8))
+
+# Per-packet ISO descriptor corruption seeds → usbip_pad_iso() memmove underflow.
+#
+# struct usbip_iso_packet_descriptor layout (16 bytes each):
+#   offset(4BE) actual_length(4BE) status(4BE) padding(4BE)
+#
+# When the per-packet actual_length inside the ISO descriptor array is corrupted
+# to a huge value, usbip_pad_iso() computes a negative actualoffset for its
+# memmove(), causing a kernel heap underwrite.  These seeds exercise that path
+# directly — prior seeds only corrupted the header-level actual_length field.
+for _np in [1, 2, 4, 8]:
+    for _bad in [0x7FFFFFFF, 0x80000000, 0xFFFFFFFF]:
+        _iso_desc = struct.pack(">II", 0, _bad) + b"\x00" * 8  # 16 bytes
+        seed(f"vhci_iso_pkt_corrupt_np{_np}_{hex(_bad)}",
+             ret_submit_fields(actual_length=0, number_of_packets=_np) + _iso_desc * _np)
+
+# Stub-side sgl_alloc() boundary seeds (for fuzz_stub_client / corpus/stub/).
+#
+# stub_recv_cmd_submit() calls sgl_alloc(transfer_buffer_length) with no upper
+# bound check.  Values at and above SG_MAX_SINGLE_ALLOC (128 pages = 512 KB on
+# x86) exercise the fallback scatter-gather allocation path.  IN transfers
+# (direction=1) trigger the alloc without needing the client to send payload.
+for _tbl in [0x80000, 0x1000000, 0x40000000, 0x7FFFFFFF, -1]:
+    seed(f"stub_tbl_in_{hex(_tbl & 0xFFFFFFFF)}",
+         urb_header(CMD_SUBMIT, direction=1, transfer_buffer_length=_tbl))
+
+# OUT direction: stub also allocates for the receive path, so exercise that too.
+for _tbl in [0x80000, 0x1000000]:
+    seed(f"stub_tbl_out_{hex(_tbl)}",
+         urb_header(CMD_SUBMIT, direction=0, transfer_buffer_length=_tbl))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 8. Raw boundary seeds
 # ══════════════════════════════════════════════════════════════════════════════
 
 seed("raw_empty",               b"")
@@ -249,7 +386,39 @@ seed("raw_max_size",            b"\x01\x11\x80\x05\x00\x00\x00\x00" + b"\xde\xad
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Done
+# Per-harness subdirs
+#
+# run-fuzzers.sh points each AFL++ instance at a subdirectory that contains
+# only the seeds meaningful for that harness.  This keeps calibration fast and
+# map density high from the start.  Cross-pollination between instances still
+# happens through the shared output/ directory.
 # ══════════════════════════════════════════════════════════════════════════════
+
+import shutil
+
+SUBDIRS = {
+    "protocol": lambda n, _: n.startswith("op_common") or n.startswith("raw_8bytes"),
+    "devlist":  lambda n, _: "devlist" in n,
+    "import":   lambda n, _: "import" in n,
+    "urb":      lambda n, _: "urb" in n or "cmd_" in n or "ret_" in n,
+    "vhci":     lambda n, _: n.startswith("vhci_"),
+    # stub seeds: CMD_SUBMIT headers for fuzz_stub_client
+    # Uses URB submit seeds as the base (same 48-byte CMD_SUBMIT format)
+    "stub":     lambda n, _: "urb_submit" in n or "urb_iso" in n or "urb_tbl" in n
+                             or "urb_ep" in n or "urb_dir" in n or "urb_setup" in n
+                             or "urb_all" in n or "urb_ret_len" in n
+                             or n.startswith("stub_tbl_"),
+}
+
+for subdir, predicate in SUBDIRS.items():
+    dest = os.path.join(OUT, subdir)
+    os.makedirs(dest, exist_ok=True)
+    count = 0
+    for fname in os.listdir(OUT):
+        src = os.path.join(OUT, fname)
+        if os.path.isfile(src) and predicate(fname, src):
+            shutil.copy2(src, os.path.join(dest, fname))
+            count += 1
+    print(f"[+]   corpus/{subdir}/: {count} seeds")
 
 print(f"[+] Generated {written} seeds in {OUT}/")

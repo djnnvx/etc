@@ -31,6 +31,7 @@
 #include <time.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -93,6 +94,13 @@ int main(int argc, char *argv[])
         /* TCP_NODELAY: no nagle buffering — send immediately */
         int one = 1;
         setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+
+        /* recv timeout: 2 s — prevents blocking forever when usbipd
+         * reads the fuzz bytes but never replies (which is normal behaviour
+         * for most malformed packets).  Without this every calibration seed
+         * times out and AFL++ aborts with "All test cases time out". */
+        struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };       /* 2 s */
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
         if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0)
             break;

@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+# /init-vhci — initramfs init for vhci-hcd client-mode fuzzing VM.
+#
+# Unlike qemu/init (which runs usbipd as a server), this init loads vhci-hcd
+# as a CLIENT and continuously tries to attach to a remote device.  The remote
+# "device" is fuzz_vhci_server running on the host, which sends malformed
+# USBIP_RET_SUBMIT responses to trigger bugs in vhci-hcd.
+#
+# This is the attack surface for CVE-2016-3955 class bugs:
+#   - actual_length > transfer_buffer_length → heap overflow in usbip_recv_xbuff
+#   - ISO descriptor mismatches → overflow in usbip_recv_iso
+#   - status / number_of_packets edge cases
+#
+# QEMU invocation (from the host):
+#   qemu-system-x86_64 \
+#     -kernel bzImage \
+#     -initrd initramfs-vhci.cpio.gz \
+#     -nographic -append "console=ttyS0 quiet" \
+#     -m 512M \
+#     -net nic,model=e1000 -net user
+#
+# The host's fuzz_vhci_server listens on 0.0.0.0:13241.
+# QEMU user-mode networking: host is reachable at 10.0.2.2 from inside the VM.
+
+set -e
+
+# ── virtual filesystems ────────────────────────────────────────────────────────
+mount -t proc     proc    /proc
+mount -t sysfs    sysfs   /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts   devpts  /dev/pts
+mount -t tmpfs    tmpfs   /tmp
+
+# debugfs: required for KCOV (/sys/kernel/debug/kcov)
+mount -t debugfs  debugfs /sys/kernel/debug 2>/dev/null || true
+
+# suppress most kernel messages on the console
+echo 1 > /proc/sys/kernel/printk
+
+# KASAN: panic immediately on memory error so AFL++ detects it via ECONNRESET
+echo 1 > /proc/sys/kernel/panic_on_oops
+echo 1 > /proc/sys/kernel/panic
+
+# ── networking ─────────────────────────────────────────────────────────────────
+# QEMU user-mode networking gives us 10.0.2.15/24, gateway 10.0.2.2
+ip link set lo   up
+ip link set eth0 up
+ip addr add 10.0.2.15/24 dev eth0
+ip route add default via 10.0.2.2 dev eth0
+
+# ── USB/IP client kernel modules ───────────────────────────────────────────────
+modprobe usbip-core 2>/dev/null || true
+modprobe vhci-hcd   2>/dev/null || true
+# Note: do NOT load usbip-host — we're only the client here
+
+# ── usbip attach watchdog ──────────────────────────────────────────────────────
+# Continuously tries to attach to the host's fuzz_vhci_server.
+# Host address: 10.0.2.2 (QEMU user-mode networking gateway)
+# Port: 13241 (fuzz_vhci_server's listening port)
+# Busid: 1-1 (matches the device in fuzz_vhci_server's OP_REP_IMPORT response)
+#
+# When fuzz_vhci_server closes the connection (normal iteration end), the attach
+# fails and the watchdog immediately retries — connecting to the next AFL++
+# iteration of fuzz_vhci_server.
+#
+# When vhci-hcd causes a KASAN report → kernel panic → VM reboots → fuzz_vhci_server
+# detects ECONNRESET → exits 1 → AFL++ records a crash.
+
+HOST="10.0.2.2"
+PORT="13241"
+BUSID="1-1"
+
+echo "usbip-fuzz: starting vhci attach watchdog (${HOST}:${PORT} busid=${BUSID})"
+
+while true; do
+    usbip attach -r "${HOST}" -p "${PORT}" -b "${BUSID}" 2>/dev/null || true
+    # Brief pause to avoid hammering if the host server isn't ready yet
+    sleep 0
+done
+
+# unreachable
