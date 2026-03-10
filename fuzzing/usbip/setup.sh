@@ -227,20 +227,40 @@ exit 1' > initramfs/usr/sbin/usbipd
     fi
     chmod +x initramfs/usr/sbin/usbipd
 
-    # If usbipd is dynamic, bundle its shared libraries
-    if [[ -f "usbipd-plain" ]] && file usbipd-plain | grep -q "dynamically linked"; then
-        log "Bundling shared libraries for dynamic usbipd..."
-        ldd usbipd-plain | grep -oP '(/[^ ]+\.so[^ ]*)' | while read lib; do
-            [[ -f "$lib" ]] || continue
-            libdir="initramfs/$(dirname "${lib#/}")"
-            mkdir -p "${libdir}"
-            cp "${lib}" "${libdir}/"
-        done
-        # Copy the dynamic linker
-        for ld in /lib64/ld-linux-x86-64.so.2 /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; do
-            [[ -f "$ld" ]] && cp "$ld" initramfs/lib64/ld-linux-x86-64.so.2 && break
-        done
+    # usbip client tool (needed by /init auto-bind and /init-vhci attach loop)
+    USBIP_TOOL_SRC=""
+    for cand in \
+        usbipd-plain-install/sbin/usbip \
+        usbipd-plain-install/usr/sbin/usbip \
+        usbipd-plain-install/bin/usbip \
+        usbipd-plain-install/usr/bin/usbip; do
+        [[ -f "${cand}" ]] && USBIP_TOOL_SRC="${cand}" && break
+    done
+    if [[ -n "${USBIP_TOOL_SRC}" ]]; then
+        cp "${USBIP_TOOL_SRC}" initramfs/usr/sbin/usbip
+        chmod +x initramfs/usr/sbin/usbip
+    else
+        warn "usbip client tool not found in usbipd-plain-install (vhci mode may fail)"
     fi
+
+    # If usbipd or usbip are dynamic, bundle their shared libraries
+    for bin in usbipd-plain "${USBIP_TOOL_SRC:-}"; do
+        [[ -n "${bin}" ]] || continue
+        [[ -f "${bin}" ]] || continue
+        if file "${bin}" | grep -q "dynamically linked"; then
+            log "Bundling shared libraries for dynamic $(basename "${bin}")..."
+            ldd "${bin}" | grep -oP '(/[^ ]+\\.so[^ ]*)' | while read lib; do
+                [[ -f "${lib}" ]] || continue
+                libdir="initramfs/$(dirname "${lib#/}")"
+                mkdir -p "${libdir}"
+                cp "${lib}" "${libdir}/"
+            done
+        fi
+    done
+    # Copy the dynamic linker
+    for ld in /lib64/ld-linux-x86-64.so.2 /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; do
+        [[ -f "$ld" ]] && cp "$ld" initramfs/lib64/ld-linux-x86-64.so.2 && break
+    done
 
     # /init script
     cp qemu/init initramfs/init
@@ -249,6 +269,20 @@ exit 1' > initramfs/usr/sbin/usbipd
     log "Packing initramfs..."
     (cd initramfs && find . | cpio -oH newc 2>/dev/null | gzip -9) > initramfs.cpio.gz
     ok "initramfs.cpio.gz: $(du -sh initramfs.cpio.gz | cut -f1)"
+fi
+
+# Build vhci client initramfs from the base image, replacing /init.
+if [[ -f "initramfs-vhci.cpio.gz" ]]; then
+    ok "initramfs-vhci.cpio.gz already exists, skipping."
+else
+    [[ -d "initramfs" ]] || { warn "initramfs/ tree missing, cannot build initramfs-vhci.cpio.gz"; exit 1; }
+    log "Assembling initramfs-vhci.cpio.gz..."
+    rm -rf initramfs-vhci
+    cp -a initramfs initramfs-vhci
+    cp qemu/init-vhci initramfs-vhci/init
+    chmod +x initramfs-vhci/init
+    (cd initramfs-vhci && find . | cpio -oH newc 2>/dev/null | gzip -9) > initramfs-vhci.cpio.gz
+    ok "initramfs-vhci.cpio.gz: $(du -sh initramfs-vhci.cpio.gz | cut -f1)"
 fi
 
 # ── 7. net_send.c ─────────────────────────────────────────────────────────────

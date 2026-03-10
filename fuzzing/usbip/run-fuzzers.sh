@@ -1,32 +1,16 @@
 #!/bin/bash
-# run-fuzzers.sh — launch the usbipd fuzzing environment in a tmux session.
+# run-fuzzers.sh — launch USB/IP fuzzing in tmux with a 2-fuzzer budget.
 #
-# Layout (2×2 tmux grid):
-#   top-left  (master)  — AFL++ master, in-process fuzzing of fuzz_protocol.
-#                         Exercises the op_common header dispatcher + reply body
-#                         parsers.  CmpLog enabled on master only.
-#   top-right (urb)     — AFL++ secondary, in-process fuzzing of fuzz_urb.
-#                         Exercises the URB submission / unlink path — the area
-#                         where CVE-2016-3955 class (transfer-length overflow) bugs
-#                         live.
-#   bot-left  (devlist) — AFL++ secondary, in-process fuzzing of fuzz_devlist.
-#                         Covers the ndev multiplication overflow and devlist body
-#                         parsing paths not reached by fuzz_protocol.
-#   bot-right (status)  — afl-whatsup live status (refreshes every 10 s).
+# Default profile (max-impact):
+#   Pane 1: in-process fuzz_urb (fast, high exec/sec, CmpLog-enabled)
+#   Pane 2: vhci kernel fuzzer (fuzz_vhci_server) against QEMU VM
 #
-# CmpLog is enabled only on the master to reduce resource usage
-# (was 8 processes = 4 fuzzers × 2 CmpLog; now 4 = 3 fuzzers + 1 CmpLog).
-# All instances share output/ for corpus cross-pollination.
+# Optional profile:
+#   --inproc  : protocol + urb only (no QEMU)
+#   --stub    : fuzz_urb + stub kernel fuzzer (fuzz_stub_client) against QEMU VM
 #
-# QEMU vhci fuzzer (fuzz_vhci_server) must be started separately:
-#   See the "QEMU fuzzer" section at the bottom of this script for exact commands.
-#
-# Prerequisites: setup.sh + build_fuzzers.sh must have completed.
-#
-# Usage:
-#   bash run-fuzzers.sh          # start fresh session
-#   bash run-fuzzers.sh --rerun  # kill existing session, start new one
-#   bash run-fuzzers.sh --status # show afl-whatsup output
+# This script intentionally keeps only two AFL++ instances active.
+# For vhci mode it also launches a helper QEMU window in the same tmux session.
 
 set -euo pipefail
 
@@ -41,16 +25,25 @@ OUTPUT_DIR="${SCRIPT_DIR}/output"
 CORPUS_DIR="${SCRIPT_DIR}/corpus"
 CORPUS_PROTOCOL="${CORPUS_DIR}/protocol"
 CORPUS_URB="${CORPUS_DIR}/urb"
+CORPUS_VHCI="${CORPUS_DIR}/vhci"
+CORPUS_STUB="${CORPUS_DIR}/stub"
 DICT="${SCRIPT_DIR}/dictionaries/usbip.dict"
-CORPUS_DEVLIST="${CORPUS_DIR}/devlist"
-TIMEOUT=1000   # ms per execution (in-process, all instances)
-NICE=10        # niceness for afl-fuzz processes (0=normal, 19=lowest priority)
+TIMEOUT=1000
+VHCI_TIMEOUT=5000
+STUB_TIMEOUT=5000
+NICE=10
+PROFILE="max-impact"
+VMLINUX="${SCRIPT_DIR}/bzImage"
+VMLINUX_QEMU="${SCRIPT_DIR}/qemu/bzImage"
+INITRD_VHCI="${SCRIPT_DIR}/initramfs-vhci.cpio.gz"
+INITRD_VHCI_QEMU="${SCRIPT_DIR}/qemu/initramfs-vhci.cpio.gz"
+INITRD_SERVER="${SCRIPT_DIR}/initramfs.cpio.gz"
+INITRD_SERVER_QEMU="${SCRIPT_DIR}/qemu/initramfs.cpio.gz"
 
 log()  { echo "[*] $*"; }
 ok()   { echo "[+] $*"; }
 die()  { echo "[!] $*" >&2; exit 1; }
 
-# ── option handling ───────────────────────────────────────────────────────────
 case "${1:-}" in
     --status)
         command -v afl-whatsup > /dev/null 2>&1 && \
@@ -60,144 +53,207 @@ case "${1:-}" in
     --rerun)
         tmux kill-session -t "${SESSION}" 2>/dev/null || true
         ;;
-    "") ;;
-    *) die "Unknown option: ${1}. Use --rerun or --status." ;;
+    --inproc)
+        PROFILE="inproc"
+        ;;
+    --stub)
+        PROFILE="stub"
+        ;;
+    --max-impact|"")
+        ;;
+    *) die "Unknown option: ${1}. Use --rerun, --status, --inproc, --stub, --max-impact." ;;
 esac
 
-# ── sanity checks ─────────────────────────────────────────────────────────────
 command -v afl-fuzz > /dev/null 2>&1 || die "afl-fuzz not found."
-[[ -f "fuzz_protocol"        ]] || die "fuzz_protocol not found. Run build_fuzzers.sh first."
-[[ -f "fuzz_protocol.cmplog" ]] || die "fuzz_protocol.cmplog not found."
-[[ -f "fuzz_urb"             ]] || die "fuzz_urb not found. Run build_fuzzers.sh first."
-[[ -f "fuzz_urb.cmplog"      ]] || die "fuzz_urb.cmplog not found."
-[[ -f "fuzz_devlist"         ]] || die "fuzz_devlist not found. Run build_fuzzers.sh first."
-[[ -f "fuzz_devlist.cmplog"  ]] || die "fuzz_devlist.cmplog not found."
-[[ -d "${CORPUS_PROTOCOL}"   ]] || die "corpus/protocol/ not found. Re-run gen_corpus.py first."
-[[ -d "${CORPUS_URB}"        ]] || die "corpus/urb/ not found. Re-run gen_corpus.py first."
-[[ -d "${CORPUS_DEVLIST}"    ]] || die "corpus/devlist/ not found. Re-run gen_corpus.py first."
+[[ -f "fuzz_urb" ]] || die "fuzz_urb not found. Run build_fuzzers.sh first."
+[[ -f "fuzz_urb.cmplog" ]] || die "fuzz_urb.cmplog not found."
+[[ -d "${CORPUS_URB}" ]] || die "corpus/urb/ not found. Re-run gen_corpus.py first."
 tmux list-sessions 2>/dev/null | grep -q "${SESSION}" && \
     die "Session '${SESSION}' already running. Use --rerun to restart."
 
-# AFL++ performance settings
 sudo sysctl -w kernel.core_pattern=core > /dev/null 2>&1 || true
 echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor > /dev/null 2>&1 || true
 
 mkdir -p "${OUTPUT_DIR}"
 
-# ── create tmux session (2×2 grid) ────────────────────────────────────────────
+if [[ "${PROFILE}" == "max-impact" || "${PROFILE}" == "stub" ]]; then
+    if [[ -f "${VMLINUX}" ]]; then
+        KERNEL_PATH="${VMLINUX}"
+    elif [[ -f "${VMLINUX_QEMU}" ]]; then
+        KERNEL_PATH="${VMLINUX_QEMU}"
+    else
+        die "Kernel image not found (expected bzImage or qemu/bzImage)."
+    fi
+fi
+
+if [[ "${PROFILE}" == "max-impact" ]]; then
+    [[ -f "fuzz_vhci_server" ]] || die "fuzz_vhci_server not found. Run build_fuzzers.sh first."
+    [[ -d "${CORPUS_VHCI}" ]] || die "corpus/vhci/ not found. Re-run gen_corpus.py first."
+
+    if [[ -f "${INITRD_VHCI}" ]]; then
+        INITRD_PATH="${INITRD_VHCI}"
+    elif [[ -f "${INITRD_VHCI_QEMU}" ]]; then
+        INITRD_PATH="${INITRD_VHCI_QEMU}"
+    else
+        die "initramfs-vhci.cpio.gz not found. Re-run setup.sh."
+    fi
+fi
+
+if [[ "${PROFILE}" == "stub" ]]; then
+    [[ -f "fuzz_stub_client" ]] || die "fuzz_stub_client not found. Run build_fuzzers.sh first."
+    [[ -d "${CORPUS_STUB}" ]] || die "corpus/stub/ not found. Re-run gen_corpus.py first."
+
+    if [[ -f "${INITRD_SERVER}" ]]; then
+        INITRD_PATH="${INITRD_SERVER}"
+    elif [[ -f "${INITRD_SERVER_QEMU}" ]]; then
+        INITRD_PATH="${INITRD_SERVER_QEMU}"
+    else
+        die "initramfs.cpio.gz not found. Re-run setup.sh."
+    fi
+fi
+
 log "Creating tmux session '${SESSION}'..."
 tmux new-session -d -s "${SESSION}" -x 220 -y 50
-
-# Build 2×2 layout:
-#   split the window into left/right halves, then split each half top/bottom.
-#   Result:  0.0 (top-left)  │  0.1 (top-right)
-#            0.2 (bot-left)  │  0.3 (bot-right)
 tmux split-window -h -t "${SESSION}:0"
-tmux split-window -v -t "${SESSION}:0.0"
-tmux split-window -v -t "${SESSION}:0.1"
 
-# ── Pane 0.0 (top-left): AFL++ master — fuzz_protocol ─────────────────────────
-log "Launching AFL++ master (fuzz_protocol)..."
-tmux send-keys -t "${SESSION}:0.0" \
-    "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
-    ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0 \
-    nice -n ${NICE} afl-fuzz \
-    -M master \
-    -i ${CORPUS_PROTOCOL} \
-    -o ${OUTPUT_DIR} \
-    -x ${DICT} \
-    -c ./fuzz_protocol.cmplog \
-    -t ${TIMEOUT} \
-    -p fast \
-    -m none \
-    -- ./fuzz_protocol" \
-    Enter
+if [[ "${PROFILE}" == "inproc" ]]; then
+    [[ -f "fuzz_protocol" ]] || die "fuzz_protocol not found. Run build_fuzzers.sh first."
+    [[ -f "fuzz_protocol.cmplog" ]] || die "fuzz_protocol.cmplog not found."
+    [[ -d "${CORPUS_PROTOCOL}" ]] || die "corpus/protocol/ not found. Re-run gen_corpus.py first."
 
-# ── Pane 0.1 (top-right): AFL++ secondary — fuzz_urb ──────────────────────────
-log "Launching AFL++ secondary (fuzz_urb — URB submission path)..."
-tmux send-keys -t "${SESSION}:0.1" \
-    "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
-    ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0 \
-    nice -n ${NICE} afl-fuzz \
-    -S urb \
-    -i ${CORPUS_URB} \
-    -o ${OUTPUT_DIR} \
-    -x ${DICT} \
-    -t ${TIMEOUT} \
-    -p fast \
-    -m none \
-    -- ./fuzz_urb" \
-    Enter
+    log "Launching AFL++ master (fuzz_protocol)..."
+    tmux send-keys -t "${SESSION}:0.0" \
+        "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
+        ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0 \
+        nice -n ${NICE} afl-fuzz \
+        -M master \
+        -i ${CORPUS_PROTOCOL} \
+        -o ${OUTPUT_DIR} \
+        -x ${DICT} \
+        -c ./fuzz_protocol.cmplog \
+        -t ${TIMEOUT} \
+        -p fast \
+        -m none \
+        -- ./fuzz_protocol" \
+        Enter
 
-# ── Pane 0.2 (bot-left): AFL++ secondary — fuzz_devlist ───────────────────────
-log "Launching AFL++ secondary (fuzz_devlist — devlist ndev overflow)..."
-tmux send-keys -t "${SESSION}:0.2" \
-    "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
-    ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0 \
-    nice -n ${NICE} afl-fuzz \
-    -S devlist \
-    -i ${CORPUS_DEVLIST} \
-    -o ${OUTPUT_DIR} \
-    -x ${DICT} \
-    -t ${TIMEOUT} \
-    -p fast \
-    -m none \
-    -- ./fuzz_devlist" \
-    Enter
+    log "Launching AFL++ secondary (fuzz_urb)..."
+    tmux send-keys -t "${SESSION}:0.1" \
+        "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
+        ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0 \
+        nice -n ${NICE} afl-fuzz \
+        -S urb \
+        -i ${CORPUS_URB} \
+        -o ${OUTPUT_DIR} \
+        -x ${DICT} \
+        -t ${TIMEOUT} \
+        -p fast \
+        -m none \
+        -- ./fuzz_urb" \
+        Enter
+elif [[ "${PROFILE}" == "max-impact" ]]; then
+    log "Launching AFL++ master (fuzz_urb, in-process lane)..."
+    tmux send-keys -t "${SESSION}:0.0" \
+        "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
+        ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0 \
+        nice -n ${NICE} afl-fuzz \
+        -M master \
+        -i ${CORPUS_URB} \
+        -o ${OUTPUT_DIR} \
+        -x ${DICT} \
+        -c ./fuzz_urb.cmplog \
+        -t ${TIMEOUT} \
+        -p fast \
+        -m none \
+        -- ./fuzz_urb" \
+        Enter
 
-# ── Pane 0.3 (bot-right): afl-whatsup live status ────────────────────────────
-log "Adding status pane (afl-whatsup)..."
-tmux send-keys -t "${SESSION}:0.3" \
+    log "Launching AFL++ secondary (fuzz_vhci_server, kernel lane)..."
+    tmux send-keys -t "${SESSION}:0.1" \
+        "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
+        nice -n ${NICE} afl-fuzz \
+        -S vhci \
+        -i ${CORPUS_VHCI} \
+        -o ${OUTPUT_DIR} \
+        -x ${DICT} \
+        -t ${VHCI_TIMEOUT} \
+        -m none \
+        -- ./fuzz_vhci_server @@ 0.0.0.0 13241" \
+        Enter
+
+    log "Starting vhci QEMU VM window..."
+    tmux new-window -t "${SESSION}" -n vm-vhci
+    tmux send-keys -t "${SESSION}:vm-vhci" \
+        "qemu-system-x86_64 \
+        -kernel ${KERNEL_PATH} \
+        -initrd ${INITRD_PATH} \
+        -nographic \
+        -append 'console=ttyS0 quiet panic=-1 oops=panic kasan_multi_shot' \
+        -m 512M \
+        -net nic,model=e1000 -net user" \
+        Enter
+else
+    log "Launching AFL++ master (fuzz_urb, in-process lane)..."
+    tmux send-keys -t "${SESSION}:0.0" \
+        "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
+        ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0 \
+        nice -n ${NICE} afl-fuzz \
+        -M master \
+        -i ${CORPUS_URB} \
+        -o ${OUTPUT_DIR} \
+        -x ${DICT} \
+        -c ./fuzz_urb.cmplog \
+        -t ${TIMEOUT} \
+        -p fast \
+        -m none \
+        -- ./fuzz_urb" \
+        Enter
+
+    log "Launching AFL++ secondary (fuzz_stub_client, kernel lane)..."
+    tmux send-keys -t "${SESSION}:0.1" \
+        "AFL_SKIP_CPUFREQ=1 AFL_AUTORESUME=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 \
+        nice -n ${NICE} afl-fuzz \
+        -S stub \
+        -i ${CORPUS_STUB} \
+        -o ${OUTPUT_DIR} \
+        -x ${DICT} \
+        -t ${STUB_TIMEOUT} \
+        -m none \
+        -- ./fuzz_stub_client @@ 127.0.0.1 13240" \
+        Enter
+
+    log "Starting stub QEMU VM window..."
+    tmux new-window -t "${SESSION}" -n vm-stub
+    tmux send-keys -t "${SESSION}:vm-stub" \
+        "qemu-system-x86_64 \
+        -kernel ${KERNEL_PATH} \
+        -initrd ${INITRD_PATH} \
+        -nographic \
+        -append 'console=ttyS0 quiet panic=-1 oops=panic kasan_multi_shot' \
+        -m 512M \
+        -net nic,model=e1000 -net user,hostfwd=tcp:127.0.0.1:13240-:3240" \
+        Enter
+fi
+
+log "Adding status window..."
+tmux new-window -t "${SESSION}" -n status
+tmux send-keys -t "${SESSION}:status" \
     "watch -n 10 '$(command -v afl-whatsup) ${OUTPUT_DIR} 2>/dev/null || echo \"output dir: ${OUTPUT_DIR}\"'" \
-    Enter
-
-# ── Window 3: QEMU vhci fuzzer instructions ───────────────────────────────────
-#
-# fuzz_vhci_server is the ONLY harness that exercises kernel memory (vhci-hcd).
-# It requires a running QEMU VM.  Launch it manually:
-#
-#   STEP 1 — start the QEMU VM (in a separate terminal or tmux pane):
-#     qemu-system-x86_64 \
-#       -kernel qemu/bzImage \
-#       -initrd qemu/initramfs-vhci.cpio.gz \
-#       -nographic \
-#       -append "console=ttyS0 quiet panic=-1 oops=panic kasan_multi_shot" \
-#       -m 512M \
-#       -net nic,model=e1000 -net user,hostfwd=tcp:127.0.0.1:13241-:3240
-#
-#   STEP 2 — once the VM boots and the watchdog starts, launch AFL++:
-#     afl-fuzz -S vhci \
-#       -i corpus/vhci \
-#       -o output \
-#       -t 5000 \
-#       -x dictionaries/usbip.dict \
-#       -- ./fuzz_vhci_server @@ 0.0.0.0 13241
-#
-#   Enumeration check: in the VM, `lsusb` should show the device and
-#   `dmesg | grep snd_usb_audio` should confirm driver binding.
-#   ISO URBs: `dmesg | grep usbip` should show EP1 submissions.
-#   Crash detection: KASAN + panic_on_oops=1 → VM reboots → ECONNRESET →
-#   fuzz_vhci_server exits 1 → AFL++ records crash in output/vhci/crashes/.
-#
-log "Adding QEMU vhci fuzzer instructions window..."
-tmux new-window -t "${SESSION}" -n vhci-howto
-tmux send-keys -t "${SESSION}:vhci-howto" \
-    "echo '=== QEMU vhci fuzzer ===' && \
-     echo 'Step 1: start QEMU VM (see run-fuzzers.sh comments for full command)' && \
-     echo 'Step 2: afl-fuzz -S vhci -i corpus/vhci -o output -t 5000 -- ./fuzz_vhci_server @@ 0.0.0.0 13241'" \
     Enter
 
 tmux select-window -t "${SESSION}:0"
 
-# ── attach ────────────────────────────────────────────────────────────────────
 ok "Fuzzing session started."
 echo ""
 echo "  Attach:       tmux attach -t ${SESSION}"
 echo "  Status:       ${0} --status"
+echo "  Profile:      ${PROFILE}"
 echo "  Crashes:      ${OUTPUT_DIR}/master/crashes/"
-echo "                ${OUTPUT_DIR}/urb/crashes/"
-echo "                ${OUTPUT_DIR}/devlist/crashes/"
-echo "  QEMU vhci:    see window 'vhci-howto' in tmux session (kernel fuzzing)"
+[[ "${PROFILE}" == "inproc" ]] && echo "                ${OUTPUT_DIR}/urb/crashes/"
+[[ "${PROFILE}" == "max-impact" ]] && echo "                ${OUTPUT_DIR}/vhci/crashes/"
+[[ "${PROFILE}" == "max-impact" ]] && echo "  QEMU console: tmux window 'vm-vhci'"
+[[ "${PROFILE}" == "stub" ]] && echo "                ${OUTPUT_DIR}/stub/crashes/"
+[[ "${PROFILE}" == "stub" ]] && echo "  QEMU console: tmux window 'vm-stub'"
 echo "  Stop:         bash cleanup.sh"
 echo ""
 

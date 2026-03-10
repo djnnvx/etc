@@ -332,6 +332,54 @@ static int send_all(int fd, const void *buf, size_t len)
     return 0;
 }
 
+/* Send in small fuzz-driven chunks to exercise short-read/reassembly paths. */
+static int send_fragmented(int fd, const uint8_t *buf, size_t len,
+                           const uint8_t *fuzz, size_t fuzz_len, size_t *fuzz_off)
+{
+    size_t done = 0;
+    while (done < len) {
+        uint8_t stepb = 0;
+        if (*fuzz_off < fuzz_len)
+            stepb = fuzz[(*fuzz_off)++];
+        size_t chunk = (size_t)(stepb % 31u) + 1u; /* 1..31 bytes */
+        if (chunk > len - done)
+            chunk = len - done;
+        if (send_all(fd, buf + done, chunk) < 0)
+            return -1;
+        done += chunk;
+    }
+    return 0;
+}
+
+/* Send either as one write or fragmented based on fuzz byte. */
+static int send_fuzzed(int fd, const uint8_t *buf, size_t len,
+                       const uint8_t *fuzz, size_t fuzz_len, size_t *fuzz_off)
+{
+    uint8_t mode = 0;
+    if (*fuzz_off < fuzz_len)
+        mode = fuzz[(*fuzz_off)++];
+    if (mode & 1)
+        return send_fragmented(fd, buf, len, fuzz, fuzz_len, fuzz_off);
+    return send_all(fd, buf, len);
+}
+
+/* Copy as many bytes as available from fuzz stream, zero-pad the rest. */
+static size_t fill_from_fuzz(uint8_t *dst, size_t want,
+                             const uint8_t *fuzz, size_t fuzz_len,
+                             size_t *fuzz_off)
+{
+    size_t copied = 0;
+    if (*fuzz_off < fuzz_len) {
+        size_t avail = fuzz_len - *fuzz_off;
+        copied = want < avail ? want : avail;
+        memcpy(dst, fuzz + *fuzz_off, copied);
+        *fuzz_off += copied;
+    }
+    if (copied < want)
+        memset(dst + copied, 0x00, want - copied);
+    return copied;
+}
+
 /* ── handshake: read OP_REQ_IMPORT, send OP_REP_IMPORT ─────────────────────── */
 
 static int do_handshake(int sock)
@@ -526,12 +574,8 @@ static int fuzz_loop(int sock, const uint8_t *fuzz, size_t fuzz_len)
             resp.base.direction = hdr.base.direction;
             resp.base.ep        = hdr.base.ep;
 
-            /* Overlay fuzz bytes onto the 28-byte ret_submit union */
-            size_t overlay = fuzz_len - fuzz_off;
-            if (overlay > sizeof(resp.u.raw))
-                overlay = sizeof(resp.u.raw);
-            memcpy(resp.u.raw, fuzz + fuzz_off, overlay);
-            fuzz_off += overlay;
+            /* Overlay fuzz bytes onto the 28-byte ret_submit union. */
+            fill_from_fuzz(resp.u.raw, sizeof(resp.u.raw), fuzz, fuzz_len, &fuzz_off);
 
             /* Clamp actual_length for the host-side payload send */
             int32_t actual_len = ntohl(resp.u.ret_submit.actual_length);
@@ -539,12 +583,46 @@ static int fuzz_loop(int sock, const uint8_t *fuzz, size_t fuzz_len)
             if (send_len < 0)       send_len = 0;
             if (send_len > MAX_ACTUAL_LEN) send_len = MAX_ACTUAL_LEN;
 
-            if (send_all(sock, &resp, sizeof(resp)) < 0)
+            /*
+             * Fuzz response semantics to hit vhci_rx dispatch/error branches:
+             *   mode 0: normal RET_SUBMIT (deep path)
+             *   mode 1: wrong command RET_UNLINK for CMD_SUBMIT
+             *   mode 2: unknown command value
+             *   mode 3: wrong seqnum
+             *   mode 4: truncate header and close
+             */
+            uint8_t dispatch_mode = 0;
+            if (fuzz_off < fuzz_len)
+                dispatch_mode = (uint8_t)(fuzz[fuzz_off++] % 5u);
+
+            if (dispatch_mode == 1) {
+                resp.base.command = htonl(USBIP_RET_UNLINK);
+            } else if (dispatch_mode == 2) {
+                uint32_t bad = 0xdead0000u;
+                if (fuzz_off + 4 <= fuzz_len) {
+                    memcpy(&bad, fuzz + fuzz_off, 4);
+                    fuzz_off += 4;
+                }
+                resp.base.command = htonl(bad);
+            } else if (dispatch_mode == 3) {
+                uint32_t seq = ntohl(resp.base.seqnum);
+                seq ^= 1u;
+                resp.base.seqnum = htonl(seq);
+            } else if (dispatch_mode == 4) {
+                size_t trunc = 1;
+                if (fuzz_off < fuzz_len)
+                    trunc = (size_t)(fuzz[fuzz_off++] % (sizeof(resp) - 1)) + 1;
+                if (send_fuzzed(sock, (const uint8_t *)&resp, trunc, fuzz, fuzz_len, &fuzz_off) < 0)
+                    return 1;
+                return 0;
+            }
+
+            if (send_fuzzed(sock, (const uint8_t *)&resp, sizeof(resp), fuzz, fuzz_len, &fuzz_off) < 0)
                 return 1;
 
             /* Send xbuff (actual_length bytes) */
             if (send_len > 0) {
-                if (send_all(sock, payload, (size_t)send_len) < 0)
+                if (send_fuzzed(sock, payload, (size_t)send_len, fuzz, fuzz_len, &fuzz_off) < 0)
                     return 1;
             }
 
@@ -579,7 +657,14 @@ static int fuzz_loop(int sock, const uint8_t *fuzz, size_t fuzz_len)
                     if (iso_send > MAX_ISO_DESC_LEN)
                         iso_send = MAX_ISO_DESC_LEN;
                     if (iso_send > 0) {
-                        if (send_all(sock, iso_buf, (size_t)iso_send) < 0)
+                        /*
+                         * IMPORTANT: drive ISO descriptor bytes from testcase
+                         * data (not constant zeros). This reaches additional
+                         * usbip_pad_iso() branches that depend on per-packet
+                         * offset/actual_length values.
+                         */
+                        fill_from_fuzz(iso_buf, iso_send, fuzz, fuzz_len, &fuzz_off);
+                        if (send_fuzzed(sock, iso_buf, (size_t)iso_send, fuzz, fuzz_len, &fuzz_off) < 0)
                             return 1;
                     }
                 }

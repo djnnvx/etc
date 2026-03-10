@@ -58,6 +58,8 @@
 
 #define OP_REQ_IMPORT       0x8003
 #define OP_REP_IMPORT       0x0003
+#define OP_REQ_DEVLIST      0x8005
+#define OP_REP_DEVLIST      0x0005
 
 #define USBIP_CMD_SUBMIT    0x00000001
 #define USBIP_CMD_UNLINK    0x00000002
@@ -82,6 +84,10 @@ struct op_req_import {
     char             busid[SYSFS_BUS_ID_SIZE];
 } __attribute__((packed));
 
+struct op_devlist_reply {
+    uint32_t ndev;
+} __attribute__((packed));
+
 struct usbip_usb_device {
     char     path[SYSFS_PATH_MAX];
     char     busid[SYSFS_BUS_ID_SIZE];
@@ -97,6 +103,13 @@ struct usbip_usb_device {
     uint8_t  bConfigurationValue;
     uint8_t  bNumConfigurations;
     uint8_t  bNumInterfaces;
+} __attribute__((packed));
+
+struct usbip_usb_interface {
+    uint8_t bInterfaceClass;
+    uint8_t bInterfaceSubClass;
+    uint8_t bInterfaceProtocol;
+    uint8_t padding;
 } __attribute__((packed));
 
 struct op_rep_import {
@@ -184,6 +197,61 @@ static int do_import(int sock, const char *busid)
         return -1;
 
     return 0;
+}
+
+/* Query OP_REQ_DEVLIST and return first busid found. */
+static int discover_busid(int sock, char out_busid[SYSFS_BUS_ID_SIZE])
+{
+    struct op_common req;
+    memset(&req, 0, sizeof(req));
+    req.version = htons(USBIP_VERSION);
+    req.code    = htons(OP_REQ_DEVLIST);
+    req.status  = htonl(0);
+    if (send_all(sock, &req, sizeof(req)) < 0)
+        return -1;
+
+    struct op_common rep;
+    memset(&rep, 0, sizeof(rep));
+    if (recv_all(sock, &rep, sizeof(rep)) < 0)
+        return -1;
+    if (ntohs(rep.code) != OP_REP_DEVLIST || ntohl(rep.status) != 0)
+        return -1;
+
+    struct op_devlist_reply dr;
+    memset(&dr, 0, sizeof(dr));
+    if (recv_all(sock, &dr, sizeof(dr)) < 0)
+        return -1;
+
+    uint32_t ndev = ntohl(dr.ndev);
+    if (ndev == 0)
+        return -1;
+    if (ndev > 1024)
+        ndev = 1024;
+
+    out_busid[0] = '\0';
+
+    for (uint32_t i = 0; i < ndev; i++) {
+        struct usbip_usb_device dev;
+        memset(&dev, 0, sizeof(dev));
+        if (recv_all(sock, &dev, sizeof(dev)) < 0)
+            return -1;
+
+        if (out_busid[0] == '\0') {
+            memcpy(out_busid, dev.busid, SYSFS_BUS_ID_SIZE);
+            out_busid[SYSFS_BUS_ID_SIZE - 1] = '\0';
+        }
+
+        uint8_t nif = dev.bNumInterfaces;
+        if (nif > 64)
+            nif = 64;
+        for (uint8_t j = 0; j < nif; j++) {
+            struct usbip_usb_interface inf;
+            if (recv_all(sock, &inf, sizeof(inf)) < 0)
+                return -1;
+        }
+    }
+
+    return out_busid[0] == '\0' ? -1 : 0;
 }
 
 /* ── fuzzing loop ───────────────────────────────────────────────────────────── *
@@ -346,13 +414,46 @@ int main(int argc, char *argv[])
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &iotv, sizeof(iotv));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &iotv, sizeof(iotv));
 
-    if (do_import(sock, "1-1") < 0) {
-        /* Import failed — stub may not be running or device not exported */
+    char busid[SYSFS_BUS_ID_SIZE];
+    memset(busid, 0, sizeof(busid));
+
+    /*
+     * Discover exported busid first. If this fails, fall back to 1-1.
+     * Reconnect before IMPORT/fuzz so the tunnel starts from a clean socket.
+     */
+    int have_busid = (discover_busid(sock, busid) == 0);
+    close(sock);
+
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) { perror("socket"); return 1; }
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &iotv, sizeof(iotv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &iotv, sizeof(iotv));
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    if (connect(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
         close(sock);
         return 0;
     }
 
-    int rc = fuzz_loop(sock, fuzz_buf, (size_t)fuzz_len);
-    close(sock);
-    return rc;  /* 1 = ECONNRESET = kernel panic → AFL++ crash */
+    const char *target_busid = have_busid ? busid : "1-1";
+    if (do_import(sock, target_busid) < 0) {
+        /* Import failed — try fallback busid before giving up. */
+        if (strcmp(target_busid, "1-1") != 0 && do_import(sock, "1-1") == 0) {
+            /* fallback succeeded */
+        } else {
+            close(sock);
+            return 0;
+        }
+    }
+
+    if (have_busid) {
+        fprintf(stderr, "[stub] using discovered busid: %s\n", target_busid);
+    } else {
+        fprintf(stderr, "[stub] devlist discovery failed, fallback busid: 1-1\n");
+    }
+
+    {
+        int rc = fuzz_loop(sock, fuzz_buf, (size_t)fuzz_len);
+        close(sock);
+        return rc;  /* 1 = ECONNRESET = kernel panic → AFL++ crash */
+    }
 }

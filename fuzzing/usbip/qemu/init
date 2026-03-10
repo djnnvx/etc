@@ -44,6 +44,28 @@ modprobe usbip-core 2>/dev/null  || true
 modprobe usbip-host 2>/dev/null  || true
 modprobe vhci-hcd  2>/dev/null   || true
 
+# ── best-effort auto export for stub-side fuzzing ──────────────────────────
+# fuzz_stub_client expects OP_REQ_IMPORT busid=1-1 by default. In minimal VMs
+# there may be no exportable USB devices; when one exists, bind it automatically.
+USBIP_BIN=""
+if [ -x /usr/sbin/usbip ]; then
+    USBIP_BIN=/usr/sbin/usbip
+elif [ -x /usr/bin/usbip ]; then
+    USBIP_BIN=/usr/bin/usbip
+fi
+
+if [ -n "$USBIP_BIN" ]; then
+    BUSID="$($USBIP_BIN list -l 2>/dev/null | sed -n 's/^- busid \\([^ ]*\\) .*/\\1/p' | head -n 1)"
+    if [ -n "$BUSID" ]; then
+        $USBIP_BIN bind -b "$BUSID" >/dev/null 2>&1 || true
+        echo "usbip-fuzz: auto-bound export busid=$BUSID"
+    else
+        echo "usbip-fuzz: no exportable USB device found (stub fuzzing may idle)"
+    fi
+else
+    echo "usbip-fuzz: usbip tool missing in initramfs (stub fuzzing may idle)"
+fi
+
 # ── usbipd watchdog loop ───────────────────────────────────────────────────
 # usbipd runs in foreground mode (no -D flag).  When it crashes or exits the
 # loop restarts it immediately — this keeps the fuzzer's "connect and send"
