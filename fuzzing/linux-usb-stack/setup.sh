@@ -84,7 +84,7 @@ if [[ -z "${GO_BIN}" ]]; then
     log "Go >= ${GO_MIN_VER} not found. Installing Go ${GO_INSTALL_VER} from upstream..."
     GO_ARCHIVE="go${GO_INSTALL_VER}.linux-amd64.tar.gz"
     GO_URL="https://golang.org/dl/${GO_ARCHIVE}"
-    wget -c "${GO_URL}" -O "${GO_ARCHIVE}"
+    wget -c --timeout=60 --tries=3 "${GO_URL}" -O "${GO_ARCHIVE}"
     tar -C "${SCRIPT_DIR}" -xzf "${GO_ARCHIVE}"
     rm -f "${GO_ARCHIVE}"
     GO_BIN="${SCRIPT_DIR}/go/bin/go"
@@ -151,14 +151,23 @@ fi
 # ── 5. Busybox (static) ──────────────────────────────────────────────────────
 BUSYBOX_DIR="busybox-${BUSYBOX_VER}"
 BUSYBOX_TAR="${BUSYBOX_DIR}.tar.bz2"
-BUSYBOX_URL="https://busybox.net/downloads/${BUSYBOX_TAR}"
+BUSYBOX_URLS=(
+    "https://busybox.net/downloads/${BUSYBOX_TAR}"
+    "https://landley.net/busybox/downloads/${BUSYBOX_TAR}"
+)
 
 if [[ -d "busybox-install" ]]; then
     ok "Busybox already built, skipping."
 else
     if [[ ! -d "${BUSYBOX_DIR}" ]]; then
         log "Downloading busybox ${BUSYBOX_VER}..."
-        wget -c "${BUSYBOX_URL}"
+        downloaded=0
+        for url in "${BUSYBOX_URLS[@]}"; do
+            log "Trying ${url}..."
+            wget -c --timeout=30 --tries=2 "${url}" && downloaded=1 && break
+            warn "Failed, trying next mirror..."
+        done
+        [[ "${downloaded}" -eq 1 ]] || { warn "All mirrors failed. Check network."; exit 1; }
         tar -xjf "${BUSYBOX_TAR}"
         rm -f "${BUSYBOX_TAR}"
     fi
@@ -190,7 +199,7 @@ if [[ -f "dropbear-install/sbin/dropbear" ]]; then
 else
     if [[ ! -d "${DROPBEAR_DIR}" ]]; then
         log "Downloading dropbear ${DROPBEAR_VER}..."
-        wget -c "${DROPBEAR_URL}"
+        wget -c --timeout=30 --tries=2 "${DROPBEAR_URL}"
         tar -xjf "${DROPBEAR_TAR}"
         rm -f "${DROPBEAR_TAR}"
     fi
