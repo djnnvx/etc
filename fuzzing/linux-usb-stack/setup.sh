@@ -110,7 +110,9 @@ else
     cd syzkaller
     make all -j"$(nproc)" 2>&1 | tail -5
     cd "${SCRIPT_DIR}"
-    ok "syzkaller built: syzkaller/bin/linux_amd64/syz-manager"
+    SYZ_MANAGER="$(find syzkaller/bin -name "syz-manager" -type f 2>/dev/null | head -1)"
+    [[ -n "${SYZ_MANAGER}" ]] || { warn "syz-manager not found after build. Check build output above."; exit 1; }
+    ok "syzkaller built: ${SYZ_MANAGER}"
 fi
 
 # ── 4. Linux kernel (mainline) ───────────────────────────────────────────────

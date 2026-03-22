@@ -90,11 +90,12 @@ case "${1:-}" in
 esac
 
 # ── preflight checks ─────────────────────────────────────────────────────────
-[[ -x "syzkaller/bin/linux_amd64/syz-manager" ]] || die "syz-manager not found. Run setup.sh first."
-[[ -f "bzImage" ]]                               || die "bzImage not found. Run setup.sh first."
-[[ -f "qemu/initramfs.cpio.gz" ]]               || die "qemu/initramfs.cpio.gz not found. Run setup.sh first."
-[[ -f "qemu/id_rsa" ]]                           || die "qemu/id_rsa not found. Run setup.sh first."
-command -v qemu-system-x86_64 > /dev/null        || die "qemu-system-x86_64 not found."
+SYZ_MANAGER="$(find "${SCRIPT_DIR}/syzkaller/bin" -name "syz-manager" -type f 2>/dev/null | head -1)"
+[[ -n "${SYZ_MANAGER}" && -x "${SYZ_MANAGER}" ]] || die "syz-manager not found under syzkaller/bin/. Run setup.sh first."
+[[ -f "bzImage" ]]              || die "bzImage not found. Run setup.sh first."
+[[ -f "qemu/initramfs.cpio.gz" ]] || die "qemu/initramfs.cpio.gz not found. Run setup.sh first."
+[[ -f "qemu/id_rsa" ]]          || die "qemu/id_rsa not found. Run setup.sh first."
+command -v qemu-system-x86_64 > /dev/null || die "qemu-system-x86_64 not found."
 
 tmux list-sessions 2>/dev/null | grep -q "^${SESSION}:" && \
     die "Session '${SESSION}' already running. Use --rerun to restart or --status to check."
@@ -126,7 +127,7 @@ launch_profile() {
     log "Launching syz-manager for profile '${profile}' (http://127.0.0.1:${port})..."
     tmux new-window -t "${SESSION}" -n "${profile}"
     tmux send-keys -t "${SESSION}:${profile}" \
-        "${SCRIPT_DIR}/syzkaller/bin/linux_amd64/syz-manager -config ${cfg}" \
+        "${SYZ_MANAGER} -config ${cfg}" \
         Enter
 }
 
