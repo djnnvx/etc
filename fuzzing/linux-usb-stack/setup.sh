@@ -150,26 +150,15 @@ fi
 
 # ── 5. Busybox (static) ──────────────────────────────────────────────────────
 BUSYBOX_DIR="busybox-${BUSYBOX_VER}"
-BUSYBOX_TAR="${BUSYBOX_DIR}.tar.bz2"
-BUSYBOX_URLS=(
-    "https://busybox.net/downloads/${BUSYBOX_TAR}"
-    "https://landley.net/busybox/downloads/${BUSYBOX_TAR}"
-)
+BUSYBOX_TAG="${BUSYBOX_VER//./_}"   # 1.36.1 → 1_36_1
+BUSYBOX_REPO="https://github.com/mirror/busybox"
 
 if [[ -d "busybox-install" ]]; then
     ok "Busybox already built, skipping."
 else
     if [[ ! -d "${BUSYBOX_DIR}" ]]; then
-        log "Downloading busybox ${BUSYBOX_VER}..."
-        downloaded=0
-        for url in "${BUSYBOX_URLS[@]}"; do
-            log "Trying ${url}..."
-            wget -c --timeout=30 --tries=2 "${url}" && downloaded=1 && break
-            warn "Failed, trying next mirror..."
-        done
-        [[ "${downloaded}" -eq 1 ]] || { warn "All mirrors failed. Check network."; exit 1; }
-        tar -xjf "${BUSYBOX_TAR}"
-        rm -f "${BUSYBOX_TAR}"
+        log "Cloning busybox ${BUSYBOX_VER} (tag ${BUSYBOX_TAG})..."
+        git clone --depth=1 --branch "${BUSYBOX_TAG}" "${BUSYBOX_REPO}" "${BUSYBOX_DIR}"
     fi
 
     log "Building static busybox..."
