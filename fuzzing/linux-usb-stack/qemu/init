@@ -1,0 +1,89 @@
+#!/bin/sh
+#
+# /init — minimal initramfs init for the linux-usb-stack fuzzing VM.
+#
+# Goals:
+#   1. Mount virtual filesystems (proc, sysfs, debugfs, configfs)
+#   2. Configure networking for syzkaller SSH access (10.0.2.15/24)
+#   3. Load USB kernel modules (raw_gadget, dummy_hcd, xhci_pci, ehci_pci)
+#   4. Start dropbear SSH server on port 22
+#
+# syzkaller connects via SSH, uploads syz-executor, and drives the fuzzer.
+# The VM stays alive in a sleep loop until syzkaller kills it.
+
+set -e
+
+# ── virtual filesystems ────────────────────────────────────────────────
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts   devpts   /dev/pts
+mount -t tmpfs    tmpfs    /tmp
+mount -t tmpfs    tmpfs    /run
+
+# debugfs: required for KCOV (/sys/kernel/debug/kcov)
+mount -t debugfs  debugfs  /sys/kernel/debug 2>/dev/null || true
+
+# configfs: required for USB gadget framework
+# syzkaller-gadget-fw profile creates gadget dirs here
+mount -t configfs configfs /sys/kernel/config 2>/dev/null || true
+
+# ── kernel tuning ──────────────────────────────────────────────────────
+echo 1 > /proc/sys/kernel/printk
+echo 1 > /proc/sys/kernel/panic_on_oops
+echo 1 > /proc/sys/kernel/panic
+
+# ── networking (QEMU user-mode: 10.0.2.15/24, gateway 10.0.2.2) ───────
+ip link set lo   up
+ip link set eth0 up
+ip addr add 10.0.2.15/24 dev eth0
+ip route add default via 10.0.2.2 dev eth0
+
+# ── USB kernel modules ─────────────────────────────────────────────────
+# If built as =y these are no-ops. If =m they load here.
+# dummy_hcd: virtual USB host+device controller pair.
+#   Required for raw_gadget to work — raw_gadget presents a fake USB device
+#   to the kernel's USB host stack via dummy_hcd's host side.
+modprobe dummy_hcd      2>/dev/null || true
+
+# usb_raw_gadget: exposes gadget endpoint to userspace via /dev/raw-gadget.
+#   syzkaller's syz_usb_connect pseudo-syscall opens this device and sends
+#   crafted USB descriptors to the kernel.
+modprobe usb_raw_gadget 2>/dev/null || true
+
+# Host controller drivers: exercised when dummy_hcd connects a fake device
+# and the kernel's USB core tries to enumerate it through xhci/ehci code.
+modprobe xhci_pci       2>/dev/null || true
+modprobe ehci_pci       2>/dev/null || true
+
+# USB class drivers: bind automatically when a compatible fake device enumerates.
+modprobe usbhid         2>/dev/null || true
+modprobe usb_storage    2>/dev/null || true
+
+# ── SSH setup for syzkaller ────────────────────────────────────────────
+# authorized_keys was baked in at initramfs build time (setup.sh injects
+# the public key matching qemu/id_rsa used by syz-manager).
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+# authorized_keys is already present from initramfs assembly
+chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+
+# Generate ephemeral dropbear host keys (new each VM boot)
+mkdir -p /etc/dropbear
+dropbearkey -t rsa   -f /etc/dropbear/dropbear_rsa_host_key  2>/dev/null
+dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key 2>/dev/null
+
+# Start dropbear SSH daemon
+# -s: no password auth  -g: no root password login  -E: log to stderr
+dropbear -s -g -E -p 22
+
+echo "usb-fuzz: VM ready — SSH on :22, configfs at /sys/kernel/config"
+
+# ── keep init alive ────────────────────────────────────────────────────
+# syzkaller SSHs in and runs syz-executor independently.
+# Kernel panics from KASAN/UBSAN cause an immediate reboot (panic_on_oops=1),
+# which syzkaller detects as a VM crash → crash is recorded → VM rebooted.
+while true; do
+    sleep 60
+done
