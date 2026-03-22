@@ -57,7 +57,7 @@ fi
 if [[ "${KEEP_BUILDS}" -eq 0 ]]; then
     log "Removing compiled kernel + initramfs..."
     rm -f bzImage
-    rm -f qemu/initramfs.cpio.gz
+    rm -f qemu/initramfs.cpio.gz qemu/disk.img
     rm -rf initramfs/
 
     log "Removing source trees (kernel, busybox, dropbear, syzkaller, Go)..."

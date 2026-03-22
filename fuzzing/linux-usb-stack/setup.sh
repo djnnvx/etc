@@ -263,7 +263,20 @@ else
     ok "qemu/initramfs.cpio.gz: $(du -sh qemu/initramfs.cpio.gz | cut -f1)"
 fi
 
-# ── 9. Workdirs ───────────────────────────────────────────────────────────────
+# ── 9. Disk image (required by syzkaller's QEMU VM type) ─────────────────────
+# syzkaller validates that the image file exists even when booting from
+# kernel + initramfs. We create a minimal ext4 image; QEMU attaches it as
+# an unused second drive — the actual rootfs comes from the initramfs.
+if [[ -f "qemu/disk.img" ]]; then
+    ok "qemu/disk.img already exists, skipping."
+else
+    log "Creating minimal disk image (128M)..."
+    dd if=/dev/zero of=qemu/disk.img bs=1M count=128 status=none
+    mkfs.ext4 -q qemu/disk.img
+    ok "qemu/disk.img created."
+fi
+
+# ── 10. Workdirs ──────────────────────────────────────────────────────────────
 for profile in raw-gadget gadget-fw usbfs; do
     mkdir -p "workdir-${profile}"
 done
