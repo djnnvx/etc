@@ -1,0 +1,103 @@
+# USB descriptor type bytes
+dt_device="\x01"
+dt_config="\x02"
+dt_string="\x03"
+dt_interface="\x04"
+dt_endpoint="\x05"
+dt_qualifier="\x06"
+dt_other_speed="\x07"
+dt_interface_power="\x08"
+dt_bos="\x0f"
+dt_device_capability="\x10"
+dt_ss_endpoint_companion="\x30"
+dt_iad="\x0b"
+
+# Standard descriptor sizes as bLength values
+blen_device="\x12"
+blen_config="\x09"
+blen_interface="\x09"
+blen_endpoint="\x07"
+blen_endpoint_audio="\x09"
+blen_bos="\x05"
+blen_devcap_min="\x03"
+blen_iad="\x08"
+
+# BOS device capability types
+bt_wireless_usb="\x01"
+bt_usb20_ext="\x02"
+bt_ss_devcap="\x03"
+bt_container_id="\x04"
+bt_platform="\x05"
+bt_ptm="\x06"
+bt_ssplus="\x0a"
+
+# USB 2.0 extension capability size (7 bytes)
+blen_usb20_ext="\x07"
+# SuperSpeed capability size (10 bytes)
+blen_ss_cap="\x0a"
+# Container ID size (20 bytes)
+blen_container_id="\x14"
+# Platform descriptor minimum size (20 bytes) — exact value triggers underflow
+blen_platform_min="\x14"
+# bLength values just below/above the platform underflow threshold
+blen_platform_under1="\x13"
+blen_platform_under2="\x12"
+blen_platform_above="\x15"
+
+# Interesting bLength values (boundaries)
+blen_zero="\x00"
+blen_one="\x01"
+blen_two="\x02"
+blen_max="\xff"
+
+# wTotalLength values (little-endian 16-bit)
+wtotal_9="\x09\x00"
+wtotal_18="\x12\x00"
+wtotal_32="\x20\x00"
+wtotal_255="\xff\x00"
+wtotal_zero="\x00\x00"
+wtotal_one="\x01\x00"
+wtotal_max="\xff\xff"
+wtotal_intmax="\xff\x7f"
+
+# bNumInterfaces / bNumEndpoints limits
+bnum_zero="\x00"
+bnum_one="\x01"
+bnum_max_ifaces="\x20"
+bnum_max_endpoints="\x20"
+bnum_255="\xff"
+
+# Config descriptor header (bLength=9, bDescriptorType=0x02)
+config_header="\x09\x02"
+# Config with wTotalLength=9 (empty — no interfaces)
+config_empty="\x09\x02\x09\x00\x00\x00\x00\x80\x00"
+# Config with wTotalLength=0xFFFF
+config_wtotal_max="\x09\x02\xff\xff"
+
+# Interface descriptor header (bLength=9, bDescriptorType=0x04)
+iface_header="\x09\x04"
+# Endpoint bulk-out header (bLength=7, bDescriptorType=0x05)
+endpoint_bulk_out="\x07\x05\x01\x02"
+# Endpoint interrupt-in
+endpoint_interrupt_in="\x07\x05\x81\x03"
+
+# BOS header (bLength=5, bDescriptorType=0x0F)
+bos_header="\x05\x0f"
+# BOS with wTotalLength=5 (no capabilities)
+bos_empty="\x05\x0f\x05\x00\x00"
+
+# IAD header (bLength=8, bDescriptorType=0x0B)
+iad_header="\x08\x0b"
+
+# Endpoint type bits in bmAttributes
+ep_control="\x00"
+ep_isoch="\x01"
+ep_bulk="\x02"
+ep_interrupt="\x03"
+
+# USB speed constants
+speed_low="\x01"
+speed_full="\x02"
+speed_high="\x03"
+speed_super="\x05"
+speed_super_plus="\x06"
