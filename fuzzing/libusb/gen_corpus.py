@@ -363,7 +363,93 @@ dev = device_desc(1)
 zero_len = struct.pack("<BBHBBBBB", 9, 0x02, 0, 0, 1, 0, 0x80, 50)
 write_seed("usbfs", "usbfs_wtotallength_0", dev + zero_len)
 
+# ─── EXTRA / ENDPOINT COMPANION SEEDS ───────────────────────────────────────
+# Seeds for fuzz_extra.c: config + endpoint with SS companion extra data.
+# LIBUSB_DT_SS_ENDPOINT_COMPANION = 0x30, size = 6 bytes.
+
+def ss_companion(blen=6, bulk_max_burst=15, bmAttr=0, wBytesPerInterval=0):
+    return struct.pack("<BBBBH", blen, 0x30, bulk_max_burst, bmAttr, wBytesPerInterval)
+
+print("[*] Generating extra/ seeds...")
+
+# Valid endpoint + SS companion (6 bytes)
+comp = ss_companion(6)
+ep = endpoint_desc(0x81, 0x02, 512)  # bulk-in
+total = 9 + 9 + len(ep) + len(comp)
+body = config_header(total) + iface_desc(1) + ep + comp
+write_seed("extra", "extra_ep_with_companion", body)
+
+# Endpoint + companion with bLength=5 (below LIBUSB_DT_SS_ENDPOINT_COMPANION_SIZE=6)
+comp_short = ss_companion(5)
+total = 9 + 9 + len(ep) + 5
+body = config_header(total) + iface_desc(1) + ep + comp_short[:5]
+write_seed("extra", "extra_companion_blen_5", body)
+
+# Endpoint + companion with bLength=2 (minimum header only)
+total = 9 + 9 + len(ep) + 2
+body = config_header(total) + iface_desc(1) + ep + b"\x02\x30"
+write_seed("extra", "extra_companion_blen_2", body)
+
+# Endpoint + companion with bLength=0 (zero — hits bLength < 2 guard)
+total = 9 + 9 + len(ep) + 2
+body = config_header(total) + iface_desc(1) + ep + b"\x00\x30"
+write_seed("extra", "extra_companion_blen_0", body)
+
+# Multiple endpoints each with a companion
+eps_with_comp = b""
+for i in range(4):
+    eps_with_comp += endpoint_desc(0x80 | (i + 1), 0x02, 512) + ss_companion(6, i, 0, 0)
+total = 9 + 9 + len(eps_with_comp)
+body = config_header(total) + iface_desc(4) + eps_with_comp
+write_seed("extra", "extra_four_eps_with_companions", body)
+
+# Endpoint with class-specific extra data (not a companion) before the companion
+class_extra = struct.pack("<BBB", 3, 0x24, 0x01)
+comp = ss_companion(6)
+total = 9 + 9 + len(ep) + len(class_extra) + len(comp)
+body = config_header(total) + iface_desc(1) + ep + class_extra + comp
+write_seed("extra", "extra_class_desc_then_companion", body)
+
+# No endpoints (nothing to walk)
+write_seed("extra", "extra_no_endpoints",
+    config_header(9, 0))
+
+# Many class-specific descriptors between interfaces (seeds config->extra_length int accumulation)
+# 30 interfaces, each preceded by several 3-byte class-specific descriptors
+class_blobs = struct.pack("<BBB", 3, 0x24, 0xFF) * 30
+ifaces_many = b""
+for i in range(30):
+    ifaces_many += class_blobs + iface_desc(0, i)
+total = 9 + len(ifaces_many)
+body = config_header(total, 30) + ifaces_many
+write_seed("extra", "extra_class_desc_accumulation", body)
+
+# ─── ADDITIONAL DESCRIPTOR SEEDS ─────────────────────────────────────────────
+# Extra seeds to stress config->extra_length signed int accumulation.
+
+print("[*] Generating additional descriptor/ seeds...")
+
+# Config with many interfaces each with large class-specific blobs (bLength=0xFF)
+# Accumulates config->extra_length toward INT_MAX with enough mutations
+big_class = struct.pack("<BB", 0xFF, 0x24) + b"\x42" * 253  # 255-byte class desc
+ifaces_with_big_class = b""
+for i in range(8):
+    ifaces_with_big_class += big_class + iface_desc(0, i)
+total = 9 + len(ifaces_with_big_class)
+body = config_header(total, 8) + ifaces_with_big_class
+write_seed("descriptor", "config_large_class_descs", body)
+
+# Config where every byte after the header is a class-specific descriptor type
+class_chain = b""
+for _ in range(50):
+    class_chain += struct.pack("<BBB", 3, 0x25, 0x00)  # 3-byte class desc, type 0x25
+total = 9 + len(class_chain) + 9  # one interface at the end
+body = config_header(total, 1) + class_chain + iface_desc(0)
+write_seed("descriptor", "config_class_desc_chain", body)
+
 print(f"\n[+] Corpus generated in {CORPUS_DIR}/")
-for d in ["descriptor", "bos", "iad", "usbfs"]:
-    n = len(os.listdir(os.path.join(CORPUS_DIR, d)))
-    print(f"    {d}/: {n} seeds")
+for d in ["descriptor", "bos", "iad", "usbfs", "extra"]:
+    path = os.path.join(CORPUS_DIR, d)
+    if os.path.isdir(path):
+        n = len(os.listdir(path))
+        print(f"    {d}/: {n} seeds")

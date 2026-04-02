@@ -30,7 +30,7 @@ case "${1:-}" in
 esac
 
 command -v afl-fuzz > /dev/null 2>&1 || die "afl-fuzz not found."
-for h in fuzz_descriptor fuzz_bos fuzz_iad fuzz_usbfs; do
+for h in fuzz_descriptor fuzz_bos fuzz_iad fuzz_usbfs fuzz_extra; do
     [[ -f "${h}" ]]        || die "${h} not found. Run setup.sh first."
     [[ -f "${h}.cmplog" ]] || die "${h}.cmplog not found."
 done
@@ -44,14 +44,18 @@ mkdir -p "${OUTPUT}"
 export AFL_SKIP_CPUFREQ=1
 export AFL_AUTORESUME=1
 export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
-export ASAN_OPTIONS="abort_on_error=1:symbolize=0:detect_leaks=0:allocator_may_return_null=1"
+export AFL_DISABLE_TRIM=1
+export AFL_KEEP_TIMEOUTS=1
+export ASAN_OPTIONS="abort_on_error=1:symbolize=0:detect_leaks=0:allocator_may_return_null=1:detect_stack_use_after_scope=1"
 export UBSAN_OPTIONS="print_stacktrace=0:halt_on_error=1"
 
+# power_schedule: master=explore (breadth-first), secondaries vary per harness
+# -l 2AT on cmplog instances: type-2 transform + auto token insertion
 afl_cmd() {
-    local role="$1" flag="$2" target="$3" corpus_sub="$4"
+    local role="$1" flag="$2" target="$3" corpus_sub="$4" sched="${5:-fast}"
     local cmplog=""
-    [[ "${flag}" == "master" ]] && cmplog="-c ./${target}.cmplog"
-    echo "afl-fuzz ${role} -i '${CORPUS}/${corpus_sub}' -o '${OUTPUT}' -x '${DICT}' -t 500 -p fast -m none ${cmplog} -- './${target}'"
+    [[ "${flag}" == "master" || "${flag}" == "cmplog" ]] && cmplog="-c ./${target}.cmplog -l 2AT"
+    echo "afl-fuzz ${role} -i '${CORPUS}/${corpus_sub}' -o '${OUTPUT}' -x '${DICT}' -t 500 -p ${sched} -m none ${cmplog} -- './${target}'"
 }
 
 log "Starting session '${SESSION}'..."
@@ -68,14 +72,14 @@ sleep 0.5
 
 send() { tmux send-keys -t "${SESSION}:${1}.${2}" "${3}" Enter; }
 
-send 0 0 "$(afl_cmd '-M master_descriptor' master fuzz_descriptor descriptor)"
-send 0 1 "$(afl_cmd '-S sec_descriptor'    sec    fuzz_descriptor descriptor)"
-send 0 2 "$(afl_cmd '-M master_bos'        master fuzz_bos        bos)"
-send 0 3 "$(afl_cmd '-S sec_bos'           sec    fuzz_bos        bos)"
-send 1 0 "$(afl_cmd '-M master_iad'        master fuzz_iad        iad)"
-send 1 1 "$(afl_cmd '-S sec_iad'           sec    fuzz_iad        iad)"
-send 1 2 "$(afl_cmd '-M master_usbfs'      master fuzz_usbfs      usbfs)"
-send 1 3 "$(afl_cmd '-S sec_usbfs'         sec    fuzz_usbfs      usbfs)"
+send 0 0 "$(afl_cmd '-M master_descriptor' master  fuzz_descriptor descriptor explore)"
+send 0 1 "$(afl_cmd '-S sec_descriptor'   sec     fuzz_descriptor descriptor rare)"
+send 0 2 "$(afl_cmd '-M master_bos'       master  fuzz_bos        bos        explore)"
+send 0 3 "$(afl_cmd '-S sec_bos'          cmplog  fuzz_bos        bos        coe)"
+send 1 0 "$(afl_cmd '-M master_iad'       master  fuzz_iad        iad        explore)"
+send 1 1 "$(afl_cmd '-S sec_iad'          sec     fuzz_iad        iad        lin)"
+send 1 2 "$(afl_cmd '-M master_usbfs'     master  fuzz_usbfs      usbfs      explore)"
+send 1 3 "$(afl_cmd '-S sec_extra'        sec     fuzz_extra      extra      fast)"
 send 2 0 "watch -n 15 'afl-whatsup ${OUTPUT} 2>/dev/null || echo waiting...'"
 
 ok "Session started. Attach: tmux attach -t ${SESSION}"

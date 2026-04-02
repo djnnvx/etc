@@ -30,6 +30,7 @@ pkill -u "$(id -un)" -f "fuzz_descriptor"    2>/dev/null || true
 pkill -u "$(id -un)" -f "fuzz_bos"           2>/dev/null || true
 pkill -u "$(id -un)" -f "fuzz_iad"           2>/dev/null || true
 pkill -u "$(id -un)" -f "fuzz_usbfs"         2>/dev/null || true
+pkill -u "$(id -un)" -f "fuzz_extra"         2>/dev/null || true
 
 [[ "${CRASHES_ONLY}" -eq 1 ]] && { ok "Processes killed."; exit 0; }
 
@@ -38,6 +39,7 @@ if [[ "${KEEP_BUILDS}" -eq 0 ]]; then
     rm -f fuzz_bos        fuzz_bos.cmplog
     rm -f fuzz_iad        fuzz_iad.cmplog
     rm -f fuzz_usbfs      fuzz_usbfs.cmplog
+    rm -f fuzz_extra      fuzz_extra.cmplog
     ok "Binaries removed."
 fi
 

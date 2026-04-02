@@ -63,21 +63,22 @@ fi
 log "Building harnesses..."
 CC="afl-clang-fast"
 SRC="libusb-src/libusb"
-CFLAGS="-fsanitize=address,undefined -g -O1 -fno-omit-frame-pointer"
+CFLAGS="-fsanitize=address,undefined,signed-integer-overflow -g -O0 -fno-omit-frame-pointer"
 CFLAGS+=" -I fuzz-include -I ${SRC} -DFUZZ_BUILD"
 CFLAGS+=" -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -Wno-unused-function -Wno-unused-variable"
 
 build() {
     local name="$1" extra_src="${2:-}" extra_flags="${3:-}"
     log "  ${name}..."
-    ${CC} ${CFLAGS} ${extra_flags} "${name}.c" fuzz_stubs.c ${extra_src} -o "${name}" -lpthread
-    AFL_LLVM_CMPLOG=1 ${CC} ${CFLAGS} ${extra_flags} "${name}.c" fuzz_stubs.c ${extra_src} -o "${name}.cmplog" -lpthread
+    AFL_LLVM_LAF_ALL=1 AFL_LLVM_INSTRUMENT=CLASSIC ${CC} ${CFLAGS} ${extra_flags} "${name}.c" fuzz_stubs.c ${extra_src} -o "${name}" -lpthread
+    AFL_LLVM_LAF_ALL=1 AFL_LLVM_INSTRUMENT=CLASSIC AFL_LLVM_CMPLOG=1 ${CC} ${CFLAGS} ${extra_flags} "${name}.c" fuzz_stubs.c ${extra_src} -o "${name}.cmplog" -lpthread
 }
 
 build fuzz_descriptor
 build fuzz_bos
 build fuzz_iad
 build fuzz_usbfs "fuzz_usbfs_shim.c" "-I ${SRC}/os"
+build fuzz_extra
 ok "Harnesses built."
 
 # corpus
