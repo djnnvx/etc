@@ -1,0 +1,55 @@
+# ASN.1 / DER tokens for libksba harnesses (AFL -x format).
+# Tags, long-form length prefixes, time strings, and common OID encodings so
+# the mutator can splice valid structure into seeds.
+
+# --- universal tags ---
+tag_bool="\x01"
+tag_int="\x02"
+tag_bitstring="\x03"
+tag_octetstring="\x04"
+tag_null="\x05"
+tag_oid="\x06"
+tag_utf8="\x0c"
+tag_seq="\x30"
+tag_set="\x31"
+tag_printable="\x13"
+tag_ia5="\x16"
+tag_utctime="\x17"
+tag_gentime="\x18"
+tag_bmpstring="\x1e"
+tag_universalstring="\x1c"
+
+# --- context / constructed tags (extensions, GeneralNames, [n]) ---
+ctx_a0="\xa0"
+ctx_a1="\xa1"
+ctx_a2="\xa2"
+ctx_a3="\xa3"
+ctx_80="\x80"
+ctx_81="\x81"
+ctx_82="\x82"
+ctx_86="\x86"
+
+# --- long-form length prefixes (overflow / OOB triggers) ---
+len_1b="\x81"
+len_2b="\x82"
+len_3b="\x83"
+len_4b="\x84"
+len_indef="\x80"
+len_big="\x84\xff\xff\xff\xff"
+
+# --- time values (drive time.c; no trailing Z = OOB-read trigger) ---
+gentime_noz="\x18\x0e\x32\x30\x32\x34\x30\x31\x30\x31\x30\x30\x30\x30\x30\x30"
+utctime="\x17\x0d\x32\x34\x30\x31\x30\x31\x30\x30\x30\x30\x30\x30\x5a"
+
+# --- common OIDs (DER value bytes) ---
+oid_rsa="\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01"
+oid_sha256rsa="\x2a\x86\x48\x86\xf7\x0d\x01\x01\x0b"
+oid_cn="\x55\x04\x03"
+oid_keyusage="\x55\x1d\x0f"
+oid_san="\x55\x1d\x11"
+oid_aki="\x55\x1d\x23"
+oid_ski="\x55\x1d\x0e"
+oid_crldp="\x55\x1d\x1f"
+oid_aia="\x2b\x06\x01\x05\x05\x07\x01\x01"
+oid_ocsp_basic="\x2b\x06\x01\x05\x05\x07\x30\x01\x01"
+oid_pkcs7_signed="\x2a\x86\x48\x86\xf7\x0d\x01\x07\x02"
