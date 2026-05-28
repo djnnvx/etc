@@ -1,0 +1,73 @@
+# XDR / RPC / NFS dictionary tokens. AFL feeds these into havoc-mutator
+# inserts/replaces, helping it produce structurally-valid sub-encodings
+# that flip past the early length checks into the deeper parsers.
+
+# --- XDR primitives ---
+"\x00\x00\x00\x00"  # 0
+"\x00\x00\x00\x01"  # 1
+"\x00\x00\x00\x04"  # 4 (min string len for many fields)
+"\x00\x00\x00\x10"  # 16
+"\x00\x00\x00\x40"  # 64
+"\x00\x00\x01\x00"  # 256
+"\xff\xff\xff\xff"  # -1 / huge unsigned
+
+# --- RPC envelope ---
+"\x00\x00\x00\x02"  # RPC version 2
+"\x00\x00\x00\x00"  # CALL direction
+"\x00\x00\x00\x01"  # REPLY direction
+"\x00\x00\x00\x00"  # MSG_ACCEPTED
+"\x00\x00\x00\x01"  # MSG_DENIED
+
+# --- Program numbers ---
+"\x00\x01\x86\xa0"  # PORTMAP 100000
+"\x00\x01\x86\xa3"  # NFS     100003
+"\x00\x01\x86\xa5"  # MOUNT   100005
+"\x00\x01\x86\xa6"  # RQUOTA  100011
+"\x00\x01\x86\xb5"  # NLM     100021
+"\x00\x01\x86\xb7"  # NSM     100024
+
+# --- NFS3 errors (RFC1813) ---
+"\x00\x00\x00\x00"  # NFS3_OK
+"\x00\x00\x00\x01"  # NFS3ERR_PERM
+"\x00\x00\x00\x02"  # NFS3ERR_NOENT
+"\x00\x00\x00\x05"  # NFS3ERR_IO
+"\x00\x00\x00\x0d"  # NFS3ERR_ACCES
+"\x00\x00\x00\x14"  # NFS3ERR_NOTDIR
+"\x00\x00\x00\x1c"  # NFS3ERR_NOSPC
+
+# --- NFS4 ops (the high-value ones for COMPOUND fuzzing) ---
+"\x00\x00\x00\x03"  # OP_ACCESS
+"\x00\x00\x00\x09"  # OP_GETATTR
+"\x00\x00\x00\x0a"  # OP_GETFH
+"\x00\x00\x00\x0f"  # OP_LOOKUP
+"\x00\x00\x00\x11"  # OP_NVERIFY
+"\x00\x00\x00\x12"  # OP_OPEN
+"\x00\x00\x00\x16"  # OP_PUTFH
+"\x00\x00\x00\x17"  # OP_PUTPUBFH
+"\x00\x00\x00\x18"  # OP_PUTROOTFH
+"\x00\x00\x00\x19"  # OP_READ
+"\x00\x00\x00\x1a"  # OP_READDIR
+"\x00\x00\x00\x1b"  # OP_READLINK
+"\x00\x00\x00\x21"  # OP_SECINFO
+"\x00\x00\x00\x25"  # OP_VERIFY
+"\x00\x00\x00\x26"  # OP_WRITE
+
+# --- NFS file types ---
+"\x00\x00\x00\x01"  # NF3REG
+"\x00\x00\x00\x02"  # NF3DIR
+"\x00\x00\x00\x03"  # NF3BLK
+"\x00\x00\x00\x05"  # NF3LNK
+"\x00\x00\x00\x06"  # NF3SOCK
+"\x00\x00\x00\x07"  # NF3FIFO
+
+# --- AUTH flavours ---
+"\x00\x00\x00\x00"  # AUTH_NONE
+"\x00\x00\x00\x01"  # AUTH_SYS
+"\x00\x00\x00\x06"  # RPCSEC_GSS
+
+# --- common path tokens that show up in dirpath/name strings ---
+"/"
+"/tmp"
+"/data"
+".."
+"."
