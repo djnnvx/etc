@@ -16,7 +16,10 @@ AFL_BIN="${SCRIPT_DIR}/afl-build/usr/local/bin"
 LIBKSBA_REPO="${LIBKSBA_REPO:-https://github.com/gpg/libksba.git}"
 LIBKSBA_TAG="${LIBKSBA_TAG:-master}"
 
-CFLAGS_FUZZ="-fsanitize=address,undefined,signed-integer-overflow -g -O0 -fno-omit-frame-pointer"
+# Drop signed-integer-overflow + shift from UBSan: libksba's DER decoders use the
+# `c = *s++ << 24` idiom (unsigned char promoted to signed int) which trips
+# shift-base for any value >= 0x80 << 24. Pure noise. Real OOBs still caught by ASan.
+CFLAGS_FUZZ="-fsanitize=address,undefined -fno-sanitize=signed-integer-overflow,shift -g -O0 -fno-omit-frame-pointer"
 CFLAGS_FUZZ+=" -Wno-implicit-function-declaration -Wno-unused-function -Wno-unused-variable"
 
 HARNESSES="fuzz_cert fuzz_crl fuzz_ocsp fuzz_cms"
