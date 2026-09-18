@@ -5,10 +5,9 @@ Usage:
   a64dis.py <elf> str <substring>         # find string + its file vaddr(s)
   a64dis.py <elf> xref <hexvaddr>         # find ADRP+ADD code refs to a vaddr
   a64dis.py <elf> dis <hexvaddr> [count]  # disassemble count insns at vaddr
-  a64dis.py <elf> plt                     # map .rela.plt slots -> import names
-No rebase: addresses are file vaddrs (p_vaddr based), matching Ghidra after you
-add its image base. Resolves adrp+add string loads.
+Addresses are file vaddrs (p_vaddr based), not rebased. Add Ghidra's image base to match.
 """
+
 import sys, struct
 from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
 from elftools.elf.elffile import ELFFile
@@ -44,7 +43,6 @@ def find_str(e,sub):
         while True:
             j=data.find(sub,i)
             if j<0: break
-            # back up to string start
             k=j
             while k>0 and 0x20<=data[k-1]<0x7f: k-=1
             end=data.find(b'\x00',j)
@@ -59,7 +57,6 @@ def disasm(e,va,count):
         print(f"0x{ins.address:x}:  {ins.mnemonic:8s} {ins.op_str}")
 
 def xref(e,target):
-    # scan executable segments for adrp+add producing target page+off
     md=Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
     for s in e.iter_segments():
         if s['p_type']!='PT_LOAD' or not (s['p_flags']&1): continue
