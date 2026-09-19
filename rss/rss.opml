@@ -19,6 +19,7 @@
 		<outline text="Just another infosec blog type of thing - Medium" title="Just another infosec blog type of thing - Medium" description="" type="rss" version="RSS" htmlUrl="https://blog.0day.rocks?source=rss----6beb88197afc---4/" xmlUrl="https://blog.0day.rocks/feed"/>
 		<outline text="Kylm" title="Kylm" description="" type="rss" version="RSS" htmlUrl="https://0xkylm.github.io/posts/" xmlUrl="https://0xkylm.github.io/posts/index.xml"/>
 		<outline text="Le Grand Continent" title="Le Grand Continent" description="" type="rss" version="RSS" htmlUrl="https://legrandcontinent.eu/fr/" xmlUrl="https://legrandcontinent.eu/fr/feed"/>
+		<outline text="Noë Flatreaud" title="Noë Flatreaud" description="" type="rss" version="RSS" htmlUrl="https://nflatrea.bearblog.dev/" xmlUrl="https://nflatrea.bearblog.dev/feed/"/>
 		<outline text="North Korean Internet" title="North Korean Internet" description="" type="rss" version="RSS" htmlUrl="https://nkinternet.com/" xmlUrl="https://nkinternet.com/feed"/>
 		<outline text="OCD Sensepost" title="OCD Sensepost" description="" type="rss" version="RSS" htmlUrl="https://sensepost.com/rss.xml" xmlUrl="https://sensepost.com/rss.xml"/>
 		<outline text="personal blog" title="personal blog" description="" type="rss" version="RSS" htmlUrl="https://djnn.sh/posts/" xmlUrl="https://djnn.sh/posts/index.xml"/>
