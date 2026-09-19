@@ -35,6 +35,55 @@
 		<outline text="ZDI: Published Advisories" title="ZDI: Published Advisories" description="" type="rss" version="RSS" htmlUrl="http://www.zerodayinitiative.com/advisories/published/" xmlUrl="https://www.zerodayinitiative.com/rss/published/"/>
 		<outline text="ZDI: Upcoming Advisories" title="ZDI: Upcoming Advisories" description="" type="rss" version="RSS" htmlUrl="http://www.zerodayinitiative.com/advisories/upcoming/" xmlUrl="https://www.zerodayinitiative.com/rss/upcoming/"/>
 		<outline text="Zero Day Initiative - Blog" title="Zero Day Initiative - Blog" description="" type="rss" version="RSS" htmlUrl="https://www.thezdi.com/blog/" xmlUrl="https://www.zerodayinitiative.com/blog/?format=rss"/>
+		<outline text="Google Project Zero" title="Google Project Zero" description="" type="rss" version="RSS" htmlUrl="https://googleprojectzero.blogspot.com/" xmlUrl="https://googleprojectzero.blogspot.com/feeds/posts/default"/>
+		<outline text="Synacktiv" title="Synacktiv" description="" type="rss" version="RSS" htmlUrl="https://www.synacktiv.com/en/publications" xmlUrl="https://www.synacktiv.com/en/feed/lastblog.xml"/>
+		<outline text="Quarkslab" title="Quarkslab" description="" type="rss" version="RSS" htmlUrl="https://blog.quarkslab.com/" xmlUrl="https://blog.quarkslab.com/feeds/all.atom.xml"/>
+		<outline text="Exodus Intelligence" title="Exodus Intelligence" description="" type="rss" version="RSS" htmlUrl="https://blog.exodusintel.com/" xmlUrl="https://blog.exodusintel.com/feed/"/>
+		<outline text="STAR Labs" title="STAR Labs" description="" type="rss" version="RSS" htmlUrl="https://starlabs.sg/blog/" xmlUrl="https://starlabs.sg/blog/index.xml"/>
+		<outline text="Calif" title="Calif" description="" type="rss" version="RSS" htmlUrl="https://blog.calif.io/" xmlUrl="https://blog.calif.io/feed"/>
+		<outline text="Trail of Bits - Fuzzing" title="Trail of Bits - Fuzzing" description="" type="rss" version="RSS" htmlUrl="https://blog.trailofbits.com/categories/fuzzing/" xmlUrl="https://blog.trailofbits.com/categories/fuzzing/index.xml"/>
+		<outline text="0patch Blog" title="0patch Blog" description="" type="rss" version="RSS" htmlUrl="https://blog.0patch.com/" xmlUrl="https://blog.0patch.com/feeds/posts/default"/>
+		<outline text="Horizon3.ai" title="Horizon3.ai" description="" type="rss" version="RSS" htmlUrl="https://horizon3.ai/" xmlUrl="https://horizon3.ai/feed/"/>
+		<outline text="Binarly" title="Binarly" description="" type="rss" version="RSS" htmlUrl="https://www.binarly.io/blog" xmlUrl="https://www.binarly.io/blog/rss.xml"/>
+		<outline text="Flatt Security" title="Flatt Security" description="" type="rss" version="RSS" htmlUrl="https://blog.flatt.tech/" xmlUrl="https://blog.flatt.tech/feed"/>
+		<outline text="DARKNAVY" title="DARKNAVY" description="" type="rss" version="RSS" htmlUrl="https://darknavy.org/blog/" xmlUrl="https://darknavy.org/blog/index.xml"/>
+		<outline text="Tencent Xuanwu Lab" title="Tencent Xuanwu Lab" description="" type="rss" version="RSS" htmlUrl="https://xlab.tencent.com/en/" xmlUrl="https://xlab.tencent.com/en/feed/"/>
+		<outline text="Pen Test Partners" title="Pen Test Partners" description="" type="rss" version="RSS" htmlUrl="https://www.pentestpartners.com/" xmlUrl="https://www.pentestpartners.com/feed/"/>
+		<outline text="Insinuator (ERNW)" title="Insinuator (ERNW)" description="" type="rss" version="RSS" htmlUrl="https://insinuator.net/" xmlUrl="https://insinuator.net/index.xml"/>
+		<outline text="Raelize" title="Raelize" description="" type="rss" version="RSS" htmlUrl="https://raelize.com/" xmlUrl="https://raelize.com/index.xml"/>
+		<outline text="Ledger Donjon" title="Ledger Donjon" description="" type="rss" version="RSS" htmlUrl="https://donjon.ledger.com/" xmlUrl="https://donjon.ledger.com/blog/rss.xml"/>
+		<outline text="Arch Cloud Labs" title="Arch Cloud Labs" description="" type="rss" version="RSS" htmlUrl="https://www.archcloudlabs.com/" xmlUrl="https://www.archcloudlabs.com/index.xml"/>
+		<outline text="Rotcee" title="Rotcee" description="" type="rss" version="RSS" htmlUrl="https://rotcee.github.io/" xmlUrl="https://rotcee.github.io/feed.xml"/>
+		<outline text="Bootlin" title="Bootlin" description="" type="rss" version="RSS" htmlUrl="https://bootlin.com/blog/" xmlUrl="https://bootlin.com/feed/"/>
+		<outline text="Memfault Interrupt" title="Memfault Interrupt" description="" type="rss" version="RSS" htmlUrl="https://interrupt.memfault.com/" xmlUrl="https://interrupt.memfault.com/feed.xml"/>
+		<outline text="Eclypsium" title="Eclypsium" description="" type="rss" version="RSS" htmlUrl="https://eclypsium.com/blog/" xmlUrl="https://eclypsium.com/feed/"/>
+		<outline text="hardwear.io" title="hardwear.io" description="" type="rss" version="RSS" htmlUrl="https://hardwear.io/" xmlUrl="https://hardwear.io/feed"/>
+		<outline text="evilsocket" title="evilsocket" description="" type="rss" version="RSS" htmlUrl="https://www.evilsocket.net/" xmlUrl="https://www.evilsocket.net/atom.xml"/>
+		<outline text="h0mbre" title="h0mbre" description="" type="rss" version="RSS" htmlUrl="https://h0mbre.github.io/" xmlUrl="https://h0mbre.github.io/feed.xml"/>
+		<outline text="lolcads tech blog" title="lolcads tech blog" description="" type="rss" version="RSS" htmlUrl="https://lolcads.github.io/" xmlUrl="https://lolcads.github.io/index.xml"/>
+		<outline text="Intrigus" title="Intrigus" description="" type="rss" version="RSS" htmlUrl="https://intrigus.org/" xmlUrl="https://intrigus.org/feed.xml"/>
+		<outline text="OSS-Fuzz Blog" title="OSS-Fuzz Blog" description="" type="rss" version="RSS" htmlUrl="https://blog.oss-fuzz.com/" xmlUrl="https://blog.oss-fuzz.com/index.xml"/>
+		<outline text="Alexander Popov" title="Alexander Popov" description="" type="rss" version="RSS" htmlUrl="https://a13xp0p0v.github.io/" xmlUrl="https://a13xp0p0v.github.io/feed.xml"/>
+		<outline text="xairy" title="xairy" description="" type="rss" version="RSS" htmlUrl="https://xairy.io/" xmlUrl="https://xairy.io/feed.xml"/>
+		<outline text="sam4k" title="sam4k" description="" type="rss" version="RSS" htmlUrl="https://sam4k.com/" xmlUrl="https://sam4k.com/rss/"/>
+		<outline text="ptr-yudai" title="ptr-yudai" description="" type="rss" version="RSS" htmlUrl="https://ptr-yudai.hatenablog.com/" xmlUrl="https://ptr-yudai.hatenablog.com/rss"/>
+		<outline text="Android Offensive Security" title="Android Offensive Security" description="" type="rss" version="RSS" htmlUrl="https://androidoffsec.withgoogle.com/" xmlUrl="https://androidoffsec.withgoogle.com/index.xml"/>
+		<outline text="windows-internals.com" title="windows-internals.com" description="" type="rss" version="RSS" htmlUrl="https://windows-internals.com/" xmlUrl="https://windows-internals.com/feed/"/>
+		<outline text="Connor McGarr" title="Connor McGarr" description="" type="rss" version="RSS" htmlUrl="https://connormcgarr.github.io/" xmlUrl="https://connormcgarr.github.io/feed.xml"/>
+		<outline text="Corelan" title="Corelan" description="" type="rss" version="RSS" htmlUrl="https://www.corelan.be/" xmlUrl="https://www.corelan.be/index.php/feed/"/>
+		<outline text="Neodyme" title="Neodyme" description="" type="rss" version="RSS" htmlUrl="https://blog.neodyme.io/" xmlUrl="https://blog.neodyme.io/rss.xml"/>
+		<outline text="imlzq" title="imlzq" description="" type="rss" version="RSS" htmlUrl="https://imlzq.com/" xmlUrl="https://imlzq.com/feed.xml"/>
+		<outline text="jhftss" title="jhftss" description="" type="rss" version="RSS" htmlUrl="https://jhftss.github.io/" xmlUrl="https://jhftss.github.io/feed.xml"/>
+		<outline text="theevilbit" title="theevilbit" description="" type="rss" version="RSS" htmlUrl="https://theevilbit.github.io/" xmlUrl="https://theevilbit.github.io/posts/index.xml"/>
+		<outline text="PortSwigger Research" title="PortSwigger Research" description="" type="rss" version="RSS" htmlUrl="https://portswigger.net/research" xmlUrl="https://portswigger.net/research/rss"/>
+		<outline text="Doyensec" title="Doyensec" description="" type="rss" version="RSS" htmlUrl="https://blog.doyensec.com/" xmlUrl="https://blog.doyensec.com/atom.xml"/>
+		<outline text="Sean Heelan" title="Sean Heelan" description="" type="rss" version="RSS" htmlUrl="https://sean.heelan.io/" xmlUrl="https://sean.heelan.io/feed/"/>
+		<outline text="Quentin Kaiser" title="Quentin Kaiser" description="" type="rss" version="RSS" htmlUrl="https://quentinkaiser.be/" xmlUrl="https://quentinkaiser.be/feed.xml"/>
+		<outline text="Embrace The Red" title="Embrace The Red" description="" type="rss" version="RSS" htmlUrl="https://embracethered.com/blog/" xmlUrl="https://embracethered.com/blog/index.xml"/>
+		<outline text="Nicholas Carlini" title="Nicholas Carlini" description="" type="rss" version="RSS" htmlUrl="https://nicholas.carlini.com/writing/" xmlUrl="https://nicholas.carlini.com/writing/feed.xml"/>
+		<outline text="tl;dr sec" title="tl;dr sec" description="" type="rss" version="RSS" htmlUrl="https://tldrsec.com/" xmlUrl="https://tldrsec.com/feed.xml"/>
+		<outline text="oss-security" title="oss-security" description="" type="rss" version="RSS" htmlUrl="https://seclists.org/oss-sec/" xmlUrl="https://seclists.org/rss/oss-sec.rss"/>
+		<outline text="LWN.net" title="LWN.net" description="" type="rss" version="RSS" htmlUrl="https://lwn.net/" xmlUrl="https://lwn.net/headlines/rss"/>
 	</outline>
 	</body>
 </opml>
