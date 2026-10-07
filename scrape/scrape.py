@@ -100,8 +100,8 @@ def links(sess, url, pat=None):
 
 
 def _name(url):
-    n = os.path.basename(urlparse(url).path) or hashlib.sha256(url.encode()).hexdigest()[:16]
-    return n
+    p = urlparse(url).path.strip("/")
+    return p.replace("/", "_") or hashlib.sha256(url.encode()).hexdigest()[:16]
 
 
 def grab(sess, urls, outdir):
